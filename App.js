@@ -80,34 +80,17 @@ function RootStack() {
       <Stack.Screen
         name="Alert"
         component={AlertScreen}
-        options={{
-          headerShown: true,
-          title: 'SELAH',
-          headerTitleAlign: 'center',
-          presentation: 'modal',
-          gestureEnabled: false,
-        }}
+        options={{headerShown: false, gestureEnabled: false, presentation: 'modal'}}
       />
       <Stack.Screen
         name="Breathe"
         component={BreatheScreen}
-        options={{
-          headerShown: true,
-          title: 'GUIDED BREATHING',
-          headerTitleAlign: 'center',
-          gestureEnabled: false,
-        }}
+        options={{headerShown: false, gestureEnabled: false}}
       />
       <Stack.Screen
         name="Done"
         component={DoneScreen}
-        options={{
-          headerShown: true,
-          title: 'SESSION COMPLETE',
-          headerTitleAlign: 'center',
-          gestureEnabled: false,
-          headerLeft: () => null,
-        }}
+        options={{headerShown: false, gestureEnabled: false}}
       />
     </Stack.Navigator>
   );
