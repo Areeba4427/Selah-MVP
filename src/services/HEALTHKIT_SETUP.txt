@@ -1,0 +1,84 @@
+SELAH — HEALTHKIT SETUP AT LAB
+================================
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 1 — INSTALL PACKAGE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  npm install react-native-health
+  cd ios && pod install && cd ..
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 2 — ADD HEALTHKIT CAPABILITY IN XCODE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. Open ios/SelahApp.xcworkspace
+  2. Click SelahApp project (top of file tree)
+  3. Select SelahApp TARGET (not the project)
+  4. Click "Signing & Capabilities" tab
+  5. Click "+ Capability" button
+  6. Search "HealthKit" → double-click to add
+  7. Check "Background Delivery" checkbox
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 3 — ADD INFO.PLIST KEYS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Open ios/SelahApp/Info.plist
+  Add these keys (right-click → Add Row):
+
+  Key: NSHealthShareUsageDescription
+  Type: String
+  Value: Selah reads your heart rate and HRV to detect stress and deliver calming prompts at the right moment.
+
+  Key: NSHealthUpdateUsageDescription
+  Type: String
+  Value: Selah saves mindfulness session data to your Health app.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 4 — RUN AND TEST
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Press ▶ Run in Xcode on your real iPhone.
+
+  First launch: iPhone will show a HealthKit permission dialog.
+  Allow all permissions.
+
+  Then open the app — biometrics will show REAL data from your Health app.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+COMMON iOS LIBRARY ISSUES & FIXES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+react-native-linear-gradient not working:
+  cd ios && pod install && cd ..
+
+Reanimated error on startup:
+  Add to ios/SelahApp/AppDelegate.mm:
+    #import <RNReanimated/RNReanimatedModule.h>
+  Or run: npx react-native-reanimated-plugin
+
+Safe area issues on iPhone (content behind notch):
+  Already handled by SafeAreaProvider in App.js ✓
+
+"Cannot find module" errors:
+  rm -rf node_modules && npm install
+  cd ios && pod install && cd ..
+
+Build fails in Xcode (red errors):
+  Product → Clean Build Folder (Cmd+Shift+K)
+  Then Run again
+
+Pod version conflicts:
+  cd ios
+  pod deintegrate
+  pod install
+  cd ..
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WHAT WORKS WITHOUT HEALTHKIT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+If HealthKit isn't set up yet, the app falls back
+to simulation automatically — no crashes.
+You can still demo the full UI flow.
