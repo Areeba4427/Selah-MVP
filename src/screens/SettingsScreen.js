@@ -154,9 +154,8 @@ locations={[0, 0.22, 0.48, 0.74, 1]}
         <View style={[styles.card, {marginBottom: 48}]}>
           <Text style={styles.cardTitle}>About</Text>
           <Text style={styles.aboutLine}>Selah MVP v1.0.0</Text>
-          <Text style={styles.aboutLine}>React Native · Android (iOS pending)</Text>
+          <Text style={styles.aboutLine}>React Native · Android & IOS</Text>
           <Text style={styles.aboutLine}>Built on JITAI principles</Text>
-          <Text style={[styles.aboutLine, {color: accent, marginTop: 8}]}>Deadline: March 31, 2026</Text>
         </View>
 
       </ScrollView>

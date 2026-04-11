@@ -28,14 +28,14 @@ const screenOptions = {
 };
 
 function TabIcon({name, focused, accent}) {
-  const icons = {
+const icons = {
     Home: focused ? '⬤' : '○',
-    Settings: focused ? '✦' : '✧',
-  };
+    Settings: focused ? '◈' : '◇',
+};
   return (
     <View style={tabStyles.iconWrap}>
       <Text style={[tabStyles.icon, focused && {color: accent}]}>{icons[name]}</Text>
-      <Text style={[tabStyles.label, focused && {color: accent}]}>{name.toUpperCase()}</Text>
+      <Text style={[tabStyles.label, focused && {color: accent}]} numberOfLines={1}>{name.toUpperCase()}</Text>
     </View>
   );
 }
@@ -142,7 +142,8 @@ const tabStyles = StyleSheet.create({
   label: {
     fontSize: 7,
     fontWeight: '700',
-    letterSpacing: 1.2,
+    letterSpacing: 0.5,
     color: Colors.textDim,
-  },
+    numberOfLines: 1,
+}
 });
