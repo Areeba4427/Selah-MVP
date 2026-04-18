@@ -1,0 +1,133 @@
+SELAH WATCH — XCODE SETUP INSTRUCTIONS
+========================================
+Do this at the university lab after pulling latest code.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 1 — ADD WATCH TARGET IN XCODE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Open ios/SelahApp.xcworkspace in Xcode
+2. File → New → Target
+3. Choose watchOS tab → Watch App
+4. Click Next
+5. Fill in:
+   Product Name:        SelahWatch
+   Bundle Identifier:   com.pause.selah.watchkitapp
+   Team:                (same as iPhone app)
+   Watch App for:       SelahApp
+6. Click Finish
+7. When asked "Activate scheme?" → click Activate
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 2 — ADD SWIFT FILES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+In Finder, go to: SelahWatch/ folder (from GitHub)
+Select ALL .swift files:
+  - SelahWatchApp.swift
+  - ContentView.swift
+  - IdleView.swift
+  - AlertView.swift
+  - BreatheView.swift
+  - DoneView.swift
+  - HapticManager.swift
+  - HealthManager.swift
+  - ConnectivityManager.swift
+  - SelahPrompt.swift
+
+Drag them into Xcode → SelahWatch folder (in file tree)
+When dialog appears:
+  ✓ Copy items if needed
+  ✓ Add to target: SelahWatch (NOT SelahApp)
+Click Finish
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 3 — DELETE DEFAULT FILES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Xcode creates default files when you add the target.
+Delete these (Move to Trash):
+  - ContentView.swift (the default one Xcode made)
+  - SelahWatchApp.swift (the default one)
+
+Keep only the files you dragged in from Step 2.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 4 — ADD CAPABILITIES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Click SelahWatch target → Signing & Capabilities tab
+
+Click + Capability and add:
+  ✓ HealthKit
+  ✓ WatchConnectivity (search for it)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 5 — ADD INFO.PLIST KEYS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Open SelahWatch/Info.plist
+Add these keys:
+
+  Key: NSHealthShareUsageDescription
+  Value: Selah reads your HRV to detect stress.
+
+  Key: NSHealthUpdateUsageDescription
+  Value: Selah saves mindfulness sessions to Health.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 6 — INSTALL WATCH CONNECTIVITY PACKAGE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+In terminal:
+  npm install react-native-watch-connectivity
+  cd ios && pod install && cd ..
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 7 — RUN ON WATCH
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Plug iPhone into Mac via USB
+2. Make sure Watch is paired to that iPhone
+   (Watch must be on wrist and unlocked)
+3. In Xcode top bar:
+   → Select SelahWatch scheme
+   → Select your Watch as device
+4. Press ▶ Run
+5. App installs on Watch in ~2 minutes
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TESTING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+On Watch:
+  → Tap "Simulate" button on idle screen
+  → Full flow should run: dark → scripture → breathing → closing → Selah
+
+From iPhone:
+  → Tap "Simulate stress event" on Home screen
+  → Watch should receive it and show the flow
+
+Real detection:
+  → Exercise briefly to raise HR
+  → Stop and rest — HRV drops as you recover
+  → Watch detects the drop and triggers automatically
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+COMMON ERRORS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+"No such module WatchKit"
+  → Make sure target is watchOS, not iOS
+
+"HealthKit not available"
+  → Add HealthKit capability in Step 4
+
+Watch app not appearing on Watch
+  → Watch must be paired, unlocked, and on wrist
+  → Try: Window → Devices → select Watch → install manually
+
+Build errors after dragging files
+  → Check files are added to SelahWatch target only
+  → Select file → File Inspector (right panel) → Target Membership
+  → Only SelahWatch should be checked
