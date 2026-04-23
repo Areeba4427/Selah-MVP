@@ -4,6 +4,7 @@
 // Displays time + HRV + simulate button for testing.
 
 import SwiftUI
+import Combine
 
 struct IdleView: View {
 

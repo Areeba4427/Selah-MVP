@@ -8,6 +8,7 @@
 // Uses WatchConnectivity framework.
 
 import Foundation
+import Combine
 import WatchConnectivity
 
 class ConnectivityManager: NSObject, ObservableObject, WCSessionDelegate {
