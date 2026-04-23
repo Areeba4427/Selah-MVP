@@ -2,6 +2,8 @@
 import React, {createContext, useContext, useState, useEffect, useRef} from 'react';
 import {Platform} from 'react-native';
 import HealthKitService from '../services/HealthKitService';
+import WatchBridge from '../services/WatchBridge';
+
 
 const AppContext = createContext(null);
 
@@ -172,7 +174,13 @@ export function AppProvider({children}) {
     }, 350);
   };
 
-  const toggleMode  = () => setIsSecular(v => !v);
+const toggleMode = () => {
+  setIsSecular(v => {
+    const newVal = !v;
+    WatchBridge.sendModeToWatch(newVal);
+    return newVal;
+  });
+};
   const getPrompts  = () => isSecular ? secularPrompts : faithPrompts;
 
   return (
