@@ -55,8 +55,18 @@
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		34B1F7042F9AD67B009F24A7 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 34B1F6142F9ACA99009F24A7 /* SelahWatch Watch App */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		34B1F6162F9ACA9A009F24A7 /* SelahWatch Watch App */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "SelahWatch Watch App"; sourceTree = "<group>"; };
+		34B1F6162F9ACA9A009F24A7 /* SelahWatch Watch App */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (34B1F7042F9AD67B009F24A7 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = "SelahWatch Watch App"; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -446,15 +456,8 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = SelahWatch;
-				INFOPLIST_KEY_NSHealthClinicalHealthRecordsShareUsageDescription = "Selah reads your heart rate and HRV to detect stress.";
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "Selah reads your heart rate and HRV to detect stress.";
-				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Selah saves mindfulness sessions to Health.";
-				INFOPLIST_KEY_UIBackgroundModes = "workout-processing";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
-				INFOPLIST_KEY_WKBackgroundModes = "workout-processing";
-				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.pause.selah;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "SelahWatch Watch App/Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -494,23 +497,18 @@
 				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
 				CODE_SIGN_ENTITLEMENTS = "SelahWatch Watch App/SelahWatch Watch AppRelease.entitlements";
-				CODE_SIGN_STYLE = Automatic;
+				"CODE_SIGN_IDENTITY[sdk=watchos*]" = "iPhone Distribution";
+				CODE_SIGN_STYLE = Manual;
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = "";
+				"DEVELOPMENT_TEAM[sdk=watchos*]" = 2PCRVU9UX2;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = SelahWatch;
-				INFOPLIST_KEY_NSHealthClinicalHealthRecordsShareUsageDescription = "Selah reads your heart rate and HRV to detect stress.";
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "Selah reads your heart rate and HRV to detect stress.";
-				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Selah saves mindfulness sessions to Health.";
-				INFOPLIST_KEY_UIBackgroundModes = "workout-processing";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
-				INFOPLIST_KEY_WKBackgroundModes = "workout-processing";
-				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.pause.selah;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "SelahWatch Watch App/Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -520,6 +518,8 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.pause.selah.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				"PROVISIONING_PROFILE_SPECIFIER[sdk=watchos*]" = "Selah Watch App Store Profile";
 				SDKROOT = watchos;
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
