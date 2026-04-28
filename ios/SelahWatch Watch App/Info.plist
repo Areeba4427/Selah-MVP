@@ -26,10 +26,6 @@
 	<string>Selah reads your heart rate and HRV to detect stress.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>Selah saves mindfulness sessions to Health.</string>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>workout-processing</string>
-	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
