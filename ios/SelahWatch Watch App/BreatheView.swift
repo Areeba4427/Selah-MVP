@@ -3,16 +3,17 @@
 // Breathing session on Apple Watch.
 // 4-4-6 pattern × 3 cycles.
 //
-// Layout:
-//   TOP    — phase label (Inhale / Hold / Exhale)
-//   CENTER — soft diffused circle (expands/contracts)
-//   BOTTOM — breathing phrase (stable per phase)
+// Fixes from previous version:
+//   - @State private var completedNaturally moved inside struct (was floating outside)
+//   - .onDisappear chained correctly inside body (was pasted outside closing brace)
+//   - switch phaseIdx haptic block moved inside runPhase() (was floating outside struct)
+//   - Phase haptics: playInhaleStart() on inhale, playExhaleStart() on exhale, silence on hold
 
 import SwiftUI
 
 private struct Phase {
     let name:     String
-    let duration: Int    // seconds
+    let duration: Int
     let key:      KeyPath<BreathePhrases, String>
 }
 
@@ -29,16 +30,17 @@ struct BreatheView: View {
     let prompt:     SelahPrompt
     let onComplete: () -> Void
 
-    @State private var phaseIndex: Int    = 0
-    @State private var cycleIndex: Int    = 0
-    @State private var phrase:     String = ""
-    @State private var circleScale: CGFloat = 0.40
-    @State private var circleOpacity: Double = 0.35
-    @State private var glowOpacity: Double   = 0.08
-    @State private var countdown: Int       = 4
+    @State private var phaseIndex:        Int     = 0
+    @State private var cycleIndex:        Int     = 0
+    @State private var phrase:            String  = ""
+    @State private var circleScale:       CGFloat = 0.40
+    @State private var circleOpacity:     Double  = 0.35
+    @State private var glowOpacity:       Double  = 0.08
+    @State private var countdown:         Int     = 4
+    @State private var completedNaturally: Bool   = false   // ← moved inside struct
 
-    @State private var timer: Timer? = nil
-    @State private var sessionStart = Date()
+    @State private var timer:        Timer? = nil
+    @State private var sessionStart: Date   = Date()
 
     var body: some View {
         ZStack {
@@ -69,14 +71,12 @@ struct BreatheView: View {
 
                 // Breathing circle — center
                 ZStack {
-                    // Outer glow
                     Circle()
                         .fill(Color.white.opacity(0.25))
                         .frame(width: 90, height: 90)
                         .scaleEffect(circleScale * 1.3)
                         .opacity(glowOpacity)
 
-                    // Core circle
                     Circle()
                         .fill(Color(red: 0.96, green: 0.98, blue: 1.0).opacity(0.55))
                         .frame(width: 80, height: 80)
@@ -101,7 +101,13 @@ struct BreatheView: View {
             runPhase(phaseIdx: 0, cycleIdx: 0)
         }
         .onDisappear {
+            // ← moved inside body, chained correctly
             timer?.invalidate()
+            // If user abandoned mid-session (crown press, wrist-down, notification),
+            // reset stress state — mirrors AppContext AppState background → resetSession()
+            if !completedNaturally {
+                HealthManager.shared.resetStress()
+            }
         }
     }
 
@@ -109,13 +115,22 @@ struct BreatheView: View {
     private func runPhase(phaseIdx: Int, cycleIdx: Int) {
         timer?.invalidate()
 
-        let p      = phases[phaseIdx]
-        let durMs  = Double(p.duration)
+        let p     = phases[phaseIdx]
+        let durMs = Double(p.duration)
 
         phaseIndex = phaseIdx
         cycleIndex = cycleIdx
         countdown  = p.duration
         phrase     = prompt.breathe[keyPath: p.key]
+
+        // ── Phase haptics — subtle tactile anchor ─────────────────────────────
+        // switch moved inside runPhase (was floating outside struct)
+        // Hold phase = silence, intentional
+        switch phaseIdx {
+        case 0: HapticManager.shared.playInhaleStart()
+        case 2: HapticManager.shared.playExhaleStart()
+        default: break
+        }
 
         // Circle animation
         let targetScale:   CGFloat = phaseIdx == 2 ? 0.40 : 1.0
@@ -148,9 +163,12 @@ struct BreatheView: View {
                 let nextCycle = nextPhase == 0 ? cycleIdx + 1 : cycleIdx
 
                 if nextPhase == 0 && nextCycle >= CYCLES {
-                    // Session complete
+                    // Session complete — mark before calling onComplete so
+                    // onDisappear knows not to reset stress
                     HealthManager.shared.saveMindfulSession(start: sessionStart, end: Date())
                     ConnectivityManager.shared.sendSessionCompletedToPhone()
+                    completedNaturally = true
+
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         onComplete()
                     }

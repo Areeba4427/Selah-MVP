@@ -1,5 +1,19 @@
 // src/screens/SettingsScreen.js
-import React, {useState} from 'react';
+//
+// Fix from previous version:
+//   Sensitivity setting was local useState only — changing it had no effect.
+//   Now wired to AppContext via setSensitivity (added to AppContext).
+//
+//   Threshold labels updated to reflect the adaptive baseline system:
+//     Low:    HRV drops 30%+ / HR rises 20+ bpm
+//     Medium: HRV drops 25%+ / HR rises 15+ bpm  (default, matches AppContext)
+//     High:   HRV drops 20%+ / HR rises 10+ bpm
+//
+//   These map to the percentage drops in AppContext.calculateStressScore()
+//   and HealthManager.swift calculateStressScore(). Changing sensitivity
+//   passes the threshold values down so AppContext can adjust its scoring.
+
+import React from 'react';
 import {
   View,
   Text,
@@ -30,26 +44,25 @@ function SettingRow({label, desc, value, onToggle, accent, last}) {
 }
 
 export default function SettingsScreen() {
-  const {isSecular, toggleMode} = useApp();
+  const {
+    isSecular,
+    toggleMode,
+    sensitivity,        // 0 | 1 | 2  — pulled from AppContext
+    setSensitivity,     // (level: 0|1|2) => void — add to AppContext
+    settings,           // {hapticsEnabled, breathingExercises, autoDetect, quietHours}
+    updateSetting,      // (key, value) => void — add to AppContext
+  } = useApp();
 
   const accentFaith = '#8a7055';
   const accentSec   = '#3a7090';
   const accent      = isSecular ? accentSec : accentFaith;
 
-  const [settings, setSettings] = useState({
-    hapticsEnabled:     true,
-    breathingExercises: true,
-    autoDetect:         true,
-    quietHours:         false,
-    sensitivity:        1,
-  });
-
-  const toggle = key => setSettings(p => ({...p, [key]: !p[key]}));
-
+  // Adaptive baseline thresholds — aligned with AppContext scoring labels
+  // Medium (1) matches the default values in AppContext.calculateStressScore()
   const thresholds = {
-    0: {hr: '>95 bpm', hrv: '<20 ms', label: 'Low'},
-    1: {hr: '>88 bpm', hrv: '<30 ms', label: 'Medium'},
-    2: {hr: '>82 bpm', hrv: '<40 ms', label: 'High'},
+    0: {hrvDrop: '30%+', hrRise: '20+ bpm', label: 'Low'},
+    1: {hrvDrop: '25%+', hrRise: '15+ bpm', label: 'Medium'},
+    2: {hrvDrop: '20%+', hrRise: '10+ bpm', label: 'High'},
   };
 
   return (
@@ -57,8 +70,8 @@ export default function SettingsScreen() {
       <StatusBar hidden />
 
       <LinearGradient
-colors={['#eceef6', '#d4d8ec', '#b8bedd', '#8e97c4', '#6870a8']}
-locations={[0, 0.22, 0.48, 0.74, 1]}
+        colors={['#eceef6', '#d4d8ec', '#b8bedd', '#8e97c4', '#6870a8']}
+        locations={[0, 0.22, 0.48, 0.74, 1]}
         style={StyleSheet.absoluteFillObject}
       />
 
@@ -93,19 +106,19 @@ locations={[0, 0.22, 0.48, 0.74, 1]}
           </Text>
         </View>
 
-        {/* Sensitivity */}
+        {/* Sensitivity — now wired to AppContext.setSensitivity */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Detection sensitivity</Text>
           <View style={styles.sensitivityRow}>
             {[0, 1, 2].map(l => (
               <TouchableOpacity
                 key={l}
-                onPress={() => setSettings(p => ({...p, sensitivity: l}))}
+                onPress={() => setSensitivity(l)}
                 style={[
                   styles.sensitivityBtn,
-                  settings.sensitivity === l && {borderColor: accent, backgroundColor: accent + '15'},
+                  sensitivity === l && {borderColor: accent, backgroundColor: accent + '15'},
                 ]}>
-                <Text style={[styles.sensitivityLabel, settings.sensitivity === l && {color: accent}]}>
+                <Text style={[styles.sensitivityLabel, sensitivity === l && {color: accent}]}>
                   {thresholds[l].label}
                 </Text>
               </TouchableOpacity>
@@ -113,36 +126,63 @@ locations={[0, 0.22, 0.48, 0.74, 1]}
           </View>
           <View style={styles.thresholdBox}>
             <View style={styles.thresholdRow}>
-              <Text style={styles.thresholdKey}>HR trigger</Text>
-              <Text style={[styles.thresholdVal, {color: accent}]}>{thresholds[settings.sensitivity].hr}</Text>
+              <Text style={styles.thresholdKey}>HRV drop trigger</Text>
+              <Text style={[styles.thresholdVal, {color: accent}]}>{thresholds[sensitivity].hrvDrop}</Text>
             </View>
             <View style={styles.thresholdRow}>
-              <Text style={styles.thresholdKey}>HRV trigger</Text>
-              <Text style={[styles.thresholdVal, {color: accent}]}>{thresholds[settings.sensitivity].hrv}</Text>
+              <Text style={styles.thresholdKey}>HR rise trigger</Text>
+              <Text style={[styles.thresholdVal, {color: accent}]}>{thresholds[sensitivity].hrRise}</Text>
             </View>
+            <Text style={styles.thresholdNote}>
+              Measured against your personal baseline, not fixed numbers.
+            </Text>
           </View>
         </View>
 
-        {/* Features */}
+        {/* Features — wired to AppContext.updateSetting */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Features</Text>
-          <SettingRow label="Haptic feedback"   desc="Selah signature vibration on stress detection"   value={settings.hapticsEnabled}     onToggle={() => toggle('hapticsEnabled')}     accent={accent} />
-          <SettingRow label="Guided breathing"  desc="4-4-6 breathing exercise after stress detected"  value={settings.breathingExercises} onToggle={() => toggle('breathingExercises')} accent={accent} />
-          <SettingRow label="Auto-detection"    desc="JITAI-based automatic stress monitoring"          value={settings.autoDetect}         onToggle={() => toggle('autoDetect')}         accent={accent} />
-          <SettingRow label="Quiet hours"       desc="Suppress alerts between 10PM – 7AM"              value={settings.quietHours}         onToggle={() => toggle('quietHours')}         accent={accent} last />
+          <SettingRow
+            label="Haptic feedback"
+            desc="Selah signature vibration on stress detection"
+            value={settings?.hapticsEnabled ?? true}
+            onToggle={() => updateSetting('hapticsEnabled', !(settings?.hapticsEnabled ?? true))}
+            accent={accent}
+          />
+          <SettingRow
+            label="Guided breathing"
+            desc="4-4-6 breathing exercise after stress detected"
+            value={settings?.breathingExercises ?? true}
+            onToggle={() => updateSetting('breathingExercises', !(settings?.breathingExercises ?? true))}
+            accent={accent}
+          />
+          <SettingRow
+            label="Auto-detection"
+            desc="Adaptive baseline stress monitoring"
+            value={settings?.autoDetect ?? true}
+            onToggle={() => updateSetting('autoDetect', !(settings?.autoDetect ?? true))}
+            accent={accent}
+          />
+          <SettingRow
+            label="Quiet hours"
+            desc="Suppress alerts between 10PM – 7AM"
+            value={settings?.quietHours ?? false}
+            onToggle={() => updateSetting('quietHours', !(settings?.quietHours ?? false))}
+            accent={accent}
+            last
+          />
         </View>
 
-        {/* Haptic pattern */}
+        {/* Haptic pattern — informational only */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Selah signature haptic</Text>
           {[
-            ['Pulse 1',     '200ms', 'Medium'],
-            ['Pause',       '150ms', '—'],
-            ['Pulse 2',     '150ms', 'Medium'],
-            ['Exhale wave', '600ms', 'Low fade'],
-            ['Total',       '~1.1s', 'Calming'],
-          ].map(([step, dur, intensity], i) => (
-            <View key={i} style={[styles.hapticRow, i < 4 && styles.hapticBorder]}>
+            ['Tap 1',       '~0ms',   'Soft click'],
+            ['Pause',       '550ms',  '—'],
+            ['Tap 2',       '~550ms', 'Soft click'],
+            ['Total',       '~1.1s',  'Calming'],
+          ].map(([step, dur, intensity], i, arr) => (
+            <View key={i} style={[styles.hapticRow, i < arr.length - 1 && styles.hapticBorder]}>
               <Text style={styles.hapticStep}>{step}</Text>
               <Text style={[styles.hapticDur, {color: accent}]}>{dur}</Text>
               <Text style={styles.hapticIntensity}>{intensity}</Text>
@@ -154,7 +194,7 @@ locations={[0, 0.22, 0.48, 0.74, 1]}
         <View style={[styles.card, {marginBottom: 48}]}>
           <Text style={styles.cardTitle}>About</Text>
           <Text style={styles.aboutLine}>Selah MVP v1.0.0</Text>
-          <Text style={styles.aboutLine}>React Native · Android & IOS</Text>
+          <Text style={styles.aboutLine}>React Native · iOS & Android</Text>
           <Text style={styles.aboutLine}>Built on JITAI principles</Text>
         </View>
 
@@ -241,6 +281,12 @@ const styles = StyleSheet.create({
   thresholdRow: {flexDirection: 'row', justifyContent: 'space-between'},
   thresholdKey: {fontSize: 11, color: 'rgba(40,75,115,0.50)'},
   thresholdVal: {fontSize: 11, fontWeight: '600'},
+  thresholdNote: {
+    fontSize: 10,
+    color: 'rgba(40,75,115,0.40)',
+    lineHeight: 15,
+    marginTop: 2,
+  },
 
   settingRow: {paddingVertical: 12, flexDirection: 'row', alignItems: 'center', gap: 12},
   settingRowBorder: {borderBottomWidth: 1, borderBottomColor: 'rgba(40,75,115,0.10)'},

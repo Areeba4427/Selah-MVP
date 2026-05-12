@@ -52,6 +52,7 @@ struct AlertView: View {
     private func startSequence() {
         // Phase 0 — dark pause
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            HapticManager.shared.playDetection()   // ← add here
             // Phase 1 — gradient rises
             withAnimation(.easeInOut(duration: 1.6)) {
                 lightOpacity = 1

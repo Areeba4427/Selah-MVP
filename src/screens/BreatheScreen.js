@@ -7,6 +7,7 @@ import {
   Animated,
   StatusBar,
   Easing,
+  TouchableOpacity,
   TouchableWithoutFeedback,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
@@ -26,8 +27,9 @@ export default function BreatheScreen({navigation, route}) {
   const {resolveStress} = useApp();
   const prompt = route.params?.prompt;
 
-  const [phase,  setPhase]  = useState(0);
-  const [phrase, setPhrase] = useState(prompt?.breathe?.inhale || 'Breathe...');
+  const [phase,       setPhase]       = useState(0);
+  const [phrase,      setPhrase]      = useState(prompt?.breathe?.inhale || 'Breathe...');
+  const [showEndBtn,  setShowEndBtn]  = useState(false);
 
   const circleScale   = useRef(new Animated.Value(CIRCLE_SMALL)).current;
   const circleOpacity = useRef(new Animated.Value(0.4)).current;
@@ -51,12 +53,10 @@ export default function BreatheScreen({navigation, route}) {
   const runPhase = useCallback(
     (phaseIdx, cycleIdx) => {
       if (!mountedRef.current) return;
-
       const p     = PHASES[phaseIdx];
       const text  = prompt?.breathe?.[p.key] || p.name;
       const durMs = p.duration * 1000;
 
-      // Phrase set ONCE — stable for entire phase
       setPhase(phaseIdx);
       setPhrase(text);
 
@@ -68,7 +68,6 @@ export default function BreatheScreen({navigation, route}) {
       if (circleAnim.current) circleAnim.current.stop();
 
       if (phaseIdx === 1) {
-        // Hold — no scale, slight opacity settle
         const anim = Animated.parallel([
           Animated.timing(circleOpacity, {toValue: targetCircleOp, duration: 800, easing: Easing.inOut(Easing.sin), useNativeDriver: true}),
           Animated.timing(glowOpacity,   {toValue: targetGlowOp,   duration: 800, easing: Easing.inOut(Easing.sin), useNativeDriver: true}),
@@ -76,7 +75,6 @@ export default function BreatheScreen({navigation, route}) {
         anim.start();
         circleAnim.current = anim;
       } else {
-        // Inhale / Exhale — smooth scale over full duration
         const anim = Animated.parallel([
           Animated.timing(circleScale,   {toValue: targetCircle,   duration: durMs, easing: Easing.inOut(Easing.sin), useNativeDriver: true}),
           Animated.timing(circleOpacity, {toValue: targetCircleOp, duration: durMs, easing: Easing.inOut(Easing.sin), useNativeDriver: true}),
@@ -117,39 +115,42 @@ export default function BreatheScreen({navigation, route}) {
     return () => clearTimeout(t);
   }, []);
 
-  const handleSkip = () => {
+  const handleEndSession = () => {
     if (timerRef.current) clearInterval(timerRef.current);
     if (circleAnim.current) circleAnim.current.stop();
     resolveStress();
-    navigation.replace('Done', {closing: prompt?.closing});
+    navigation.popToTop();
   };
 
   return (
-    <TouchableWithoutFeedback onLongPress={handleSkip} delayLongPress={1500}>
+    <TouchableWithoutFeedback onLongPress={() => setShowEndBtn(true)} delayLongPress={1500}>
       <Animated.View style={[styles.root, {opacity: screenOpacity}]}>
         <StatusBar hidden />
 
-        {/* Icy gradient — same palette as all other screens */}
         <LinearGradient
-            colors={['#eceef6', '#d4d8ec', '#b8bedd', '#8e97c4', '#6870a8']}
-            locations={[0, 0.22, 0.48, 0.74, 1]}
+          colors={['#eceef6', '#d4d8ec', '#b8bedd', '#8e97c4', '#6870a8']}
+          locations={[0, 0.22, 0.48, 0.74, 1]}
           style={StyleSheet.absoluteFillObject}
         />
 
-        {/* Phase label — dark, visible on pale top */}
-        <Text style={styles.phaseLabel}>
-          {PHASES[phase].name}
-        </Text>
+        {/* Phase label */}
+        <Text style={styles.phaseLabel}>{PHASES[phase].name}</Text>
 
-        {/* Breathing circle */}
+        {/* Circle */}
         <View style={styles.circleWrap}>
-          <Animated.View
-            style={[styles.core, {opacity: circleOpacity, transform: [{scale: circleScale}]}]}
-          />
+          <Animated.View style={[styles.outerGlow, {opacity: glowOpacity, transform: [{scale: glowScale}]}]} />
+          <Animated.View style={[styles.core, {opacity: circleOpacity, transform: [{scale: circleScale}]}]} />
         </View>
 
-        {/* Phrase — dark, readable on mid-blue lower half */}
+        {/* Phrase */}
         <Text style={styles.phrase}>{phrase}</Text>
+
+        {/* End session button — shown after long press */}
+        {showEndBtn && (
+          <TouchableOpacity onPress={handleEndSession} style={styles.endBtn}>
+            <Text style={styles.endBtnText}>End Session</Text>
+          </TouchableOpacity>
+        )}
 
       </Animated.View>
     </TouchableWithoutFeedback>
@@ -157,43 +158,33 @@ export default function BreatheScreen({navigation, route}) {
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  root: {flex: 1, alignItems: 'center', justifyContent: 'center'},
   phaseLabel: {
-    position: 'absolute',
-    top: '14%',
-    fontSize: 15,
-    fontWeight: '300',
-    letterSpacing: 5,
-    color: 'rgba(40,70,110,0.72)',
+    position: 'absolute', top: '14%',
+    fontSize: 15, fontWeight: '300', letterSpacing: 5,
+    color: 'rgba(40,50,90,0.72)',
   },
-  circleWrap: {
-    width: 280,
-    height: 280,
-    alignItems: 'center',
-    justifyContent: 'center',
+  circleWrap: {width: 280, height: 280, alignItems: 'center', justifyContent: 'center'},
+  outerGlow: {
+    position: 'absolute', width: 380, height: 380, borderRadius: 190,
+    backgroundColor: 'rgba(255,255,255,0.30)',
   },
-
   core: {
-    position: 'absolute',
-    width: 220,
-    height: 220,
-    borderRadius: 110,
+    position: 'absolute', width: 220, height: 220, borderRadius: 110,
     backgroundColor: 'rgba(245,252,255,0.55)',
   },
   phrase: {
-    position: 'absolute',
-    bottom: '11%',
-    fontSize: 17,
-    fontWeight: '300',
-    fontStyle: 'italic',
-    color: 'rgba(30,60,100,0.78)',
-    textAlign: 'center',
-    letterSpacing: 0.3,
-    paddingHorizontal: 44,
-    lineHeight: 26,
+    position: 'absolute', bottom: '11%',
+    fontSize: 17, fontWeight: '300', fontStyle: 'italic',
+    color: 'rgba(30,40,80,0.78)', textAlign: 'center',
+    letterSpacing: 0.3, paddingHorizontal: 44, lineHeight: 26,
   },
+  endBtn: {
+    position: 'absolute', bottom: '4%',
+    paddingVertical: 8, paddingHorizontal: 24,
+    borderRadius: 999,
+    backgroundColor: 'rgba(160,64,64,0.15)',
+    borderWidth: 1, borderColor: 'rgba(160,64,64,0.30)',
+  },
+  endBtnText: {fontSize: 12, color: '#a04040', fontWeight: '500', letterSpacing: 1},
 });

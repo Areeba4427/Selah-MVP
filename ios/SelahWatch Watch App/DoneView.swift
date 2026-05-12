@@ -94,7 +94,6 @@ struct DoneView: View {
                     }
                     // 5. Return to idle
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
-                        HealthManager.shared.resetStress()
                         onFinish()
                     }
                 }

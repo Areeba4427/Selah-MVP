@@ -1,13 +1,18 @@
 // SelahWatch/HapticManager.swift
 //
-// Client's haptic patterns adapted for Apple Watch.
-// Watch uses WKHapticType — different from iPhone CoreHaptics.
+// Softened haptic patterns per client feedback:
+//   "haptic feedback feels too aggressive — soften/refine so it feels
+//    more like a gentle nudge than an alert"
 //
-// Detection pattern (1.94s equivalent):
-//   notification → pause → click → pause → directionUp (wave)
+// Detection pattern (~1.5s):
+//   click → pause → click  (two soft taps, no notification)
 //
-// Closing pattern (3.17s equivalent):
-//   click → pause → click → long pause → directionUp → stop
+// Closing pattern (~2.0s):
+//   click → long pause → directionDown × 2  (whisper-soft exhale wave)
+//
+// Breathing phase cue (optional, per-phase):
+//   directionUp  on Inhale start
+//   directionDown on Exhale start
 
 import WatchKit
 
@@ -17,55 +22,38 @@ class HapticManager {
     private let device = WKInterfaceDevice.current()
 
     // ── Detection haptic — fires when stress detected ─────────────────────────
-    // Approximates the client's 1.94s CoreHaptics pattern
+    // Replaced .notification (jarring) with two gentle .click taps.
     func playDetection() {
-        // Pulse 1 — medium (notification = strongest on Watch)
-        device.play(.notification)
-
-        // Pause 150ms then Pulse 2
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            self.device.play(.click)
-
-            // Pause then start exhale wave
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                self.device.play(.directionUp)
-
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
-                    self.device.play(.directionUp)
-
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
-                        self.device.play(.directionUp)
-                    }
-                }
-            }
-        }
-    }
-
-    // ── Closing haptic — fires when "Selah" appears ───────────────────────────
-    // Approximates the client's 3.17s closing wave pattern
-    func playClosing() {
-        // Opening soft tap
         device.play(.click)
 
-        // Second gentle tap
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.50) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
             self.device.play(.click)
+        }
+    }
 
-            // Long pause then exhale wave
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.30) {
+    // ── Closing haptic — fires when "Selah" word appears ─────────────────────
+    // One opening tap, long breath-space, then a soft descending wave.
+    func playClosing() {
+        device.play(.click)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.10) {
+            self.device.play(.directionDown)
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 self.device.play(.directionDown)
-
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
-                    self.device.play(.directionDown)
-
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
-                        // Final crisp micro-tap
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.80) {
-                            self.device.play(.stop)
-                        }
-                    }
-                }
             }
         }
     }
+
+    // ── Breathing phase cues (optional) ──────────────────────────────────────
+    // Call at the start of each phase for a subtle tactile anchor.
+    func playInhaleStart() {
+        device.play(.directionUp)
+    }
+
+    func playExhaleStart() {
+        device.play(.directionDown)
+    }
+
+    // Hold phase: no haptic — silence is intentional.
 }

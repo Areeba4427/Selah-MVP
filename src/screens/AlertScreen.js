@@ -1,4 +1,12 @@
 // src/screens/AlertScreen.js
+//
+// Fix from previous version:
+//   HapticService.detection() moved from screen mount into the t0 callback,
+//   so it fires at Phase 1 (gradient rise, ~0.8s in) — not while the screen
+//   is still black. Matches AlertView.swift which fires playDetection() at
+//   the same moment. Previously the haptic fired 0.8s before any visual,
+//   making it feel disconnected.
+
 import React, {useEffect, useRef} from 'react';
 import {
   View,
@@ -25,25 +33,30 @@ export default function AlertScreen({navigation, route}) {
   };
 
   useEffect(() => {
-    // Fire Selah signature haptic immediately on screen mount
-    HapticService.detection();
-
     // Phase 0 — dark pause (0.8s)
     const t0 = setTimeout(() => {
-      // Phase 1 — icy gradient rises in
+
+      // Phase 1 — gradient rises + haptic fires together
+      // Haptic moved here from screen mount so it lands with the visual,
+      // not 0.8s before it in the dark.
+      HapticService.detection();
+
       Animated.timing(lightOpacity, {
         toValue: 1, duration: 1600, useNativeDriver: true,
       }).start(() => {
+
         // Phase 2 — scripture reference fades in
         Animated.timing(refOpacity, {
           toValue: 1, duration: 700, useNativeDriver: true,
         }).start(() => {
-          // Hold 3s then navigate
+
+          // Hold 3s then fade out and navigate
           const t2 = setTimeout(() => {
             Animated.timing(refOpacity, {
               toValue: 0, duration: 600, useNativeDriver: true,
             }).start(() => goToBreathe());
           }, 3000);
+
           return () => clearTimeout(t2);
         });
       });

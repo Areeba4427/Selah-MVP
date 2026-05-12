@@ -1,4 +1,11 @@
 // src/screens/HomeScreen.js
+//
+// Fix from previous version:
+//   handleSimulate now calls WatchBridge.sendSimulateToWatch(isSecular)
+//   before running the iPhone flow. Previously the iPhone simulate button
+//   ran the local flow only — the Watch never knew it was pressed.
+//   WatchBridge.js had sendSimulateToWatch() ready but it was never called.
+
 import React, {useEffect, useRef, useState} from 'react';
 import {
   View,
@@ -7,9 +14,11 @@ import {
   StatusBar,
   Animated,
   TouchableOpacity,
+  ScrollView,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import {useApp} from '../context/AppContext';
+import WatchBridge from '../services/WatchBridge';
 
 function LiveDot({color}) {
   const op = useRef(new Animated.Value(1)).current;
@@ -25,14 +34,19 @@ function LiveDot({color}) {
 }
 
 export default function HomeScreen({navigation}) {
-  const {isSecular, toggleMode, biometrics, isStressSimulating, simulateStress} = useApp();
+  const {
+    isSecular, toggleMode, biometrics,
+    isStressSimulating, simulateStress,
+    debugInfo, resetSession, activePrompt,
+  } = useApp();
 
-  const accentFaith = '#8a7055';   // warm gold — visible on light bg
-  const accentSec   = '#3a7090';   // teal-blue — visible on light bg
+  const accentFaith = '#8a7055';
+  const accentSec   = '#3a7090';
   const accent      = isSecular ? accentSec : accentFaith;
 
-  const [time, setTime]       = useState('');
-  const [dateStr, setDateStr] = useState('');
+  const [time, setTime]           = useState('');
+  const [dateStr, setDateStr]     = useState('');
+  const [showDebug, setShowDebug] = useState(false);
   const fadeIn = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -52,6 +66,9 @@ export default function HomeScreen({navigation}) {
   }, []);
 
   const handleSimulate = () => {
+    // Notify Watch so it runs the flow in parallel with the iPhone
+    // WatchBridge.sendSimulateToWatch was defined but never called here
+    WatchBridge.sendSimulateToWatch(isSecular);
     simulateStress(prompt => navigation.navigate('Alert', {prompt}));
   };
 
@@ -60,210 +77,217 @@ export default function HomeScreen({navigation}) {
   return (
     <View style={styles.root}>
       <StatusBar hidden />
-
-      {/* Same icy gradient as all other screens */}
       <LinearGradient
-colors={['#eceef6', '#d4d8ec', '#b8bedd', '#8e97c4', '#6870a8']}
-locations={[0, 0.22, 0.48, 0.74, 1]}
+        colors={['#eceef6', '#d4d8ec', '#b8bedd', '#8e97c4', '#6870a8']}
+        locations={[0, 0.22, 0.48, 0.74, 1]}
         style={StyleSheet.absoluteFillObject}
       />
 
-      <Animated.View style={[styles.inner, {opacity: fadeIn}]}>
+      <ScrollView
+        style={{flex: 1}}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}>
 
-        {/* Wordmark */}
-        <View style={styles.header}>
-          <Text style={styles.wordmark}>SELAH</Text>
-          <Text style={styles.tagline}>Wearable stress companion</Text>
-        </View>
+        <Animated.View style={[styles.inner, {opacity: fadeIn}]}>
 
-        {/* Time */}
-        <View style={styles.timeBlock}>
-          <Text style={styles.timeText}>{time}</Text>
-          <Text style={styles.dateText}>{dateStr}</Text>
-          <View style={styles.statusRow}>
-            <LiveDot color={accent} />
-            <Text style={[styles.statusLabel, {color: accent}]}>HRV monitoring active</Text>
+          {/* Wordmark */}
+          <View style={styles.header}>
+            <Text style={styles.wordmark}>SELAH</Text>
+            <Text style={styles.tagline}>Wearable stress companion</Text>
           </View>
-        </View>
 
-        {/* Mode toggle */}
-        <View style={styles.modeRow}>
-          <TouchableOpacity
-            onPress={isSecular ? toggleMode : null}
-            style={[styles.modeBtn, !isSecular && {borderColor: accentFaith, backgroundColor: 'rgba(138,112,85,0.10)'}]}>
-            <Text style={[styles.modeBtnText, !isSecular && {color: accentFaith}]}>Faith</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={!isSecular ? toggleMode : null}
-            style={[styles.modeBtn, isSecular && {borderColor: accentSec, backgroundColor: 'rgba(58,112,144,0.10)'}]}>
-            <Text style={[styles.modeBtnText, isSecular && {color: accentSec}]}>Secular</Text>
-          </TouchableOpacity>
-        </View>
+          {/* Time */}
+          <View style={styles.timeBlock}>
+            <Text style={styles.timeText}>{time}</Text>
+            <Text style={styles.dateText}>{dateStr}</Text>
+            <View style={styles.statusRow}>
+              <LiveDot color={accent} />
+              <Text style={[styles.statusLabel, {color: accent}]}>HRV monitoring active</Text>
+            </View>
+          </View>
 
-        {/* Stress index */}
-        <View style={styles.stressRow}>
-          <Text style={styles.stressLabel}>Stress index</Text>
-          <Text style={[styles.stressValue, stressIndex > 65 && {color: '#a04040'}]}>
-            {stressIndex}<Text style={styles.stressMax}> /100</Text>
-          </Text>
-        </View>
-        <View style={styles.stressTrack}>
-          <View style={[
-            styles.stressFill,
-            {
-              width: `${stressIndex}%`,
-              backgroundColor: stressIndex > 65 ? '#a04040' : stressIndex > 40 ? '#6a8850' : accent,
-            },
-          ]} />
-          <View style={styles.stressThreshold} />
-        </View>
+          {/* Mode toggle */}
+          <View style={styles.modeRow}>
+            <TouchableOpacity
+              onPress={isSecular ? toggleMode : null}
+              style={[styles.modeBtn, !isSecular && {borderColor: accentFaith, backgroundColor: 'rgba(138,112,85,0.10)'}]}>
+              <Text style={[styles.modeBtnText, !isSecular && {color: accentFaith}]}>Faith</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={!isSecular ? toggleMode : null}
+              style={[styles.modeBtn, isSecular && {borderColor: accentSec, backgroundColor: 'rgba(58,112,144,0.10)'}]}>
+              <Text style={[styles.modeBtnText, isSecular && {color: accentSec}]}>Secular</Text>
+            </TouchableOpacity>
+          </View>
 
-        {/* Simulate button */}
-        <TouchableOpacity
-          onPress={isStressSimulating ? null : handleSimulate}
-          activeOpacity={0.8}
-          style={[styles.simulateBtn, isStressSimulating && {opacity: 0.5}]}>
-          <View style={styles.simulateBtnInner}>
-            <View style={[styles.simulateDot, {
-              backgroundColor: isStressSimulating ? '#6a8850' : '#a04040',
-            }]} />
-            <Text style={styles.simulateBtnText}>
-              {isStressSimulating ? 'Detecting...' : 'Simulate stress event'}
+          {/* Stress index */}
+          <View style={styles.stressRow}>
+            <Text style={styles.stressLabel}>Stress index</Text>
+            <Text style={[styles.stressValue, stressIndex > 65 && {color: '#a04040'}]}>
+              {stressIndex}<Text style={styles.stressMax}> /100</Text>
             </Text>
           </View>
-        </TouchableOpacity>
+          <View style={styles.stressTrack}>
+            <View style={[
+              styles.stressFill,
+              {
+                width: `${stressIndex}%`,
+                backgroundColor: stressIndex > 65 ? '#a04040' : stressIndex > 40 ? '#6a8850' : accent,
+              },
+            ]} />
+            <View style={styles.stressThreshold} />
+          </View>
 
-        <Text style={styles.simulateHint}>Triggers the full Selah flow</Text>
+          {/* Active session warning + end button */}
+          {activePrompt && (
+            <TouchableOpacity onPress={resetSession} style={styles.endSessionBtn}>
+              <Text style={styles.endSessionText}>⚠ Session active — Tap to end</Text>
+            </TouchableOpacity>
+          )}
 
-      </Animated.View>
+          {/* Simulate button */}
+          <TouchableOpacity
+            onPress={isStressSimulating ? null : handleSimulate}
+            activeOpacity={0.8}
+            style={[styles.simulateBtn, isStressSimulating && {opacity: 0.5}]}>
+            <View style={styles.simulateBtnInner}>
+              <View style={[styles.simulateDot, {
+                backgroundColor: isStressSimulating ? '#6a8850' : '#a04040',
+              }]} />
+              <Text style={styles.simulateBtnText}>
+                {isStressSimulating ? 'Detecting...' : 'Simulate stress event'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          <Text style={styles.simulateHint}>Triggers the full Selah flow</Text>
+
+          {/* Debug panel toggle */}
+          <TouchableOpacity onPress={() => setShowDebug(v => !v)} style={styles.debugToggle}>
+            <Text style={styles.debugToggleText}>
+              {showDebug ? '▲ Hide debug info' : '▼ Show debug info'}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Debug panel */}
+          {showDebug && debugInfo && (
+            <View style={styles.debugPanel}>
+              <Text style={styles.debugTitle}>STRESS DETECTION DEBUG</Text>
+
+              <View style={styles.debugRow}>
+                <Text style={styles.debugKey}>Current HR</Text>
+                <Text style={styles.debugVal}>{debugInfo.currentHR ? `${Math.round(debugInfo.currentHR)} bpm` : '—'}</Text>
+              </View>
+              <View style={styles.debugRow}>
+                <Text style={styles.debugKey}>Baseline HR</Text>
+                <Text style={styles.debugVal}>{debugInfo.baselineHR} bpm</Text>
+              </View>
+              <View style={styles.debugRow}>
+                <Text style={styles.debugKey}>Current HRV</Text>
+                <Text style={styles.debugVal}>{debugInfo.currentHRV ? `${Math.round(debugInfo.currentHRV)} ms` : '—'}</Text>
+              </View>
+              <View style={styles.debugRow}>
+                <Text style={styles.debugKey}>Baseline HRV</Text>
+                <Text style={styles.debugVal}>{debugInfo.baselineHRV} ms</Text>
+              </View>
+              <View style={[styles.debugRow, {marginTop: 8}]}>
+                <Text style={styles.debugKey}>Score</Text>
+                <Text style={[styles.debugVal, {color: debugInfo.score >= 5 ? '#a04040' : '#6a8850', fontWeight: '700'}]}>
+                  {debugInfo.score} / 5
+                </Text>
+              </View>
+              <View style={styles.debugRow}>
+                <Text style={styles.debugKey}>Blocked</Text>
+                <Text style={styles.debugVal}>{debugInfo.blocked ? 'Yes' : 'No'}</Text>
+              </View>
+              {debugInfo.cooldownRemaining > 0 && (
+                <View style={styles.debugRow}>
+                  <Text style={styles.debugKey}>Cooldown</Text>
+                  <Text style={styles.debugVal}>{debugInfo.cooldownRemaining} min left</Text>
+                </View>
+              )}
+              <Text style={styles.debugReasonTitle}>Reasons:</Text>
+              {(debugInfo.reasons || []).map((r, i) => (
+                <Text key={i} style={styles.debugReason}>· {r}</Text>
+              ))}
+            </View>
+          )}
+
+        </Animated.View>
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  root:    {flex: 1},
+  content: {paddingBottom: 40},
   inner: {
-    width: '100%',
     alignItems: 'center',
     paddingHorizontal: 32,
+    paddingTop: 56,
     gap: 24,
   },
-  header: {alignItems: 'center'},
+  header:   {alignItems: 'center'},
   wordmark: {
-    fontSize: 34,
-    fontWeight: '200',
-    letterSpacing: 14,
-    color: 'rgba(30,60,100,0.75)',
-    marginBottom: 6,
+    fontSize: 34, fontWeight: '200', letterSpacing: 14,
+    color: 'rgba(30,40,80,0.75)', marginBottom: 6,
   },
   tagline: {
-    fontSize: 9,
-    letterSpacing: 2.5,
-    color: 'rgba(40,75,115,0.40)',
-    textTransform: 'uppercase',
+    fontSize: 9, letterSpacing: 2.5,
+    color: 'rgba(40,50,90,0.40)', textTransform: 'uppercase',
   },
-  timeBlock: {alignItems: 'center'},
-  timeText: {
-    fontSize: 58,
-    fontWeight: '200',
-    letterSpacing: 2,
-    color: 'rgba(25,55,95,0.78)',
-    lineHeight: 66,
-  },
-  dateText: {
-    fontSize: 10,
-    letterSpacing: 2,
-    color: 'rgba(40,75,115,0.42)',
-    marginTop: 4,
-    marginBottom: 10,
-    textTransform: 'uppercase',
-  },
+  timeBlock:   {alignItems: 'center'},
+  timeText:    {fontSize: 58, fontWeight: '200', letterSpacing: 2, color: 'rgba(25,35,75,0.78)', lineHeight: 66},
+  dateText:    {fontSize: 10, letterSpacing: 2, color: 'rgba(40,50,90,0.40)', marginTop: 4, marginBottom: 10, textTransform: 'uppercase'},
   statusRow:   {flexDirection: 'row', alignItems: 'center', gap: 6},
   liveDot:     {width: 5, height: 5, borderRadius: 3},
   statusLabel: {fontSize: 9, fontWeight: '600', letterSpacing: 1.5, textTransform: 'uppercase'},
   modeRow:     {flexDirection: 'row', gap: 10},
   modeBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 28,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: 'rgba(40,75,115,0.18)',
-    backgroundColor: 'rgba(40,75,115,0.05)',
+    paddingVertical: 8, paddingHorizontal: 28, borderRadius: 999,
+    borderWidth: 1, borderColor: 'rgba(40,50,90,0.18)',
+    backgroundColor: 'rgba(40,50,90,0.05)',
   },
-  modeBtnText: {
-    fontSize: 11,
-    fontWeight: '500',
-    letterSpacing: 1.5,
-    color: 'rgba(40,75,115,0.35)',
-    textTransform: 'uppercase',
-  },
-  stressRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
-    width: '100%',
-  },
-  stressLabel: {
-    fontSize: 9,
-    fontWeight: '600',
-    letterSpacing: 1.5,
-    color: 'rgba(40,75,115,0.45)',
-    textTransform: 'uppercase',
-  },
-  stressValue: {
-    fontSize: 20,
-    fontWeight: '200',
-    color: 'rgba(25,55,95,0.75)',
-  },
-  stressMax: {fontSize: 11, color: 'rgba(40,75,115,0.35)'},
+  modeBtnText: {fontSize: 11, fontWeight: '500', letterSpacing: 1.5, color: 'rgba(40,50,90,0.35)', textTransform: 'uppercase'},
+  stressRow: {flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', width: '100%'},
+  stressLabel: {fontSize: 9, fontWeight: '600', letterSpacing: 1.5, color: 'rgba(40,50,90,0.45)', textTransform: 'uppercase'},
+  stressValue: {fontSize: 20, fontWeight: '200', color: 'rgba(25,35,75,0.75)'},
+  stressMax:   {fontSize: 11, color: 'rgba(40,50,90,0.35)'},
   stressTrack: {
-    width: '100%',
-    height: 3,
-    backgroundColor: 'rgba(40,75,115,0.12)',
-    borderRadius: 2,
-    marginTop: -16,
-    overflow: 'visible',
-    position: 'relative',
+    width: '100%', height: 3, backgroundColor: 'rgba(40,50,90,0.12)',
+    borderRadius: 2, marginTop: -16, overflow: 'visible', position: 'relative',
   },
   stressFill:      {height: '100%', borderRadius: 2},
-  stressThreshold: {
-    position: 'absolute',
-    top: -3, bottom: -3, left: '65%',
-    width: 1,
-    backgroundColor: 'rgba(40,75,115,0.20)',
+  stressThreshold: {position: 'absolute', top: -3, bottom: -3, left: '65%', width: 1, backgroundColor: 'rgba(40,50,90,0.20)'},
+  endSessionBtn: {
+    width: '100%', padding: 12, borderRadius: 12,
+    backgroundColor: 'rgba(160,64,64,0.15)',
+    borderWidth: 1, borderColor: 'rgba(160,64,64,0.30)',
+    alignItems: 'center',
   },
+  endSessionText: {fontSize: 12, color: '#a04040', fontWeight: '500', letterSpacing: 0.5},
   simulateBtn: {
-    width: '100%',
-    borderRadius: 16,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(40,75,115,0.18)',
-    marginTop: 8,
+    width: '100%', borderRadius: 16, overflow: 'hidden',
+    borderWidth: 1, borderColor: 'rgba(40,50,90,0.18)',
     backgroundColor: 'rgba(255,255,255,0.25)',
   },
-  simulateBtnInner: {
-    paddingVertical: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    justifyContent: 'center',
+  simulateBtnInner: {paddingVertical: 20, flexDirection: 'row', alignItems: 'center', gap: 10, justifyContent: 'center'},
+  simulateDot:      {width: 7, height: 7, borderRadius: 4},
+  simulateBtnText:  {fontSize: 12, fontWeight: '400', letterSpacing: 2.5, color: 'rgba(25,35,75,0.75)', textTransform: 'uppercase'},
+  simulateHint:     {fontSize: 10, color: 'rgba(40,50,90,0.35)', letterSpacing: 0.5, marginTop: -12},
+  debugToggle:      {paddingVertical: 8},
+  debugToggleText:  {fontSize: 10, color: 'rgba(40,50,90,0.45)', letterSpacing: 1},
+  debugPanel: {
+    width: '100%', backgroundColor: 'rgba(255,255,255,0.30)',
+    borderRadius: 12, padding: 14,
+    borderWidth: 1, borderColor: 'rgba(40,50,90,0.15)',
+    gap: 5,
   },
-  simulateDot:     {width: 7, height: 7, borderRadius: 4},
-  simulateBtnText: {
-    fontSize: 12,
-    fontWeight: '400',
-    letterSpacing: 2.5,
-    color: 'rgba(25,55,95,0.75)',
-    textTransform: 'uppercase',
-  },
-  simulateHint: {
-    fontSize: 10,
-    color: 'rgba(40,75,115,0.35)',
-    letterSpacing: 0.5,
-    marginTop: -12,
-  },
+  debugTitle:      {fontSize: 8, fontWeight: '700', letterSpacing: 2, color: 'rgba(40,50,90,0.55)', textTransform: 'uppercase', marginBottom: 6},
+  debugRow:        {flexDirection: 'row', justifyContent: 'space-between'},
+  debugKey:        {fontSize: 11, color: 'rgba(40,50,90,0.55)'},
+  debugVal:        {fontSize: 11, color: 'rgba(25,35,75,0.80)', fontWeight: '500'},
+  debugReasonTitle:{fontSize: 9, color: 'rgba(40,50,90,0.45)', marginTop: 8, marginBottom: 2},
+  debugReason:     {fontSize: 10, color: 'rgba(40,50,90,0.55)', paddingLeft: 4},
 });
