@@ -1,4 +1,11 @@
 // src/screens/BreatheScreen.js
+//
+// Change from previous version:
+//   Phase haptics added to runPhase — mirrors BreatheView.swift switch phaseIdx:
+//     Inhale → HapticService.inhaleStart()   (Watch: playInhaleStart)
+//     Hold   → silence                        (Watch: no haptic, intentional)
+//     Exhale → HapticService.exhaleStart()   (Watch: playExhaleStart)
+
 import React, {useEffect, useRef, useState, useCallback} from 'react';
 import {
   View,
@@ -12,6 +19,7 @@ import {
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import {useApp} from '../context/AppContext';
+import HapticService from '../services/HapticService';
 
 const CYCLES = 3;
 const PHASES = [
@@ -27,9 +35,9 @@ export default function BreatheScreen({navigation, route}) {
   const {resolveStress} = useApp();
   const prompt = route.params?.prompt;
 
-  const [phase,       setPhase]       = useState(0);
-  const [phrase,      setPhrase]      = useState(prompt?.breathe?.inhale || 'Breathe...');
-  const [showEndBtn,  setShowEndBtn]  = useState(false);
+  const [phase,      setPhase]      = useState(0);
+  const [phrase,     setPhrase]     = useState(prompt?.breathe?.inhale || 'Breathe...');
+  const [showEndBtn, setShowEndBtn] = useState(false);
 
   const circleScale   = useRef(new Animated.Value(CIRCLE_SMALL)).current;
   const circleOpacity = useRef(new Animated.Value(0.4)).current;
@@ -59,6 +67,11 @@ export default function BreatheScreen({navigation, route}) {
 
       setPhase(phaseIdx);
       setPhrase(text);
+
+      // ── Phase haptics — mirrors BreatheView.swift switch phaseIdx ──────────
+      // Hold (phaseIdx === 1) = silence, intentional — no call made
+      if (phaseIdx === 0) HapticService.inhaleStart();
+      if (phaseIdx === 2) HapticService.exhaleStart();
 
       const targetCircle   = phaseIdx === 2 ? CIRCLE_SMALL : CIRCLE_FULL;
       const targetCircleOp = phaseIdx === 2 ? 0.28 : phaseIdx === 1 ? 0.55 : 0.65;
