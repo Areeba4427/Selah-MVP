@@ -2,35 +2,29 @@
 //
 // Adaptive stress detector — aligned with AppContext.js scoring system.
 //
-// Replaces fixed thresholds (HRV < 30, HR > 88) with:
+// Trigger logic:
 //   - Personal rolling baseline (HRV + HR)
 //   - Scoring: HRV drop +2, HR rise +2, low movement +1, persistence +1
 //   - Trigger when score >= 5
-//   - 15-minute cooldown between triggers
 //   - Workout/active energy filter
 //   - Baseline only updated on calm readings (score < 5)
-//   - calculateStressScore() called once per evaluation cycle (no double-call)
-//
-// Debug info published via @Published debugInfo for IdleView display.
 
 import Foundation
 import HealthKit
 import Combine
 
-// ── Debug snapshot (mirrors AppContext debugInfo) ─────────────────────────────
+// ── Debug snapshot ────────────────────────────────────────────────────────────
 struct StressDebugInfo {
-    var currentHR:          Double?
-    var currentHRV:         Double?
-    var baselineHR:         Double
-    var baselineHRV:        Double
-    var score:              Int
-    var reasons:            [String]
-    var blocked:            Bool
-    var cooldownRemaining:  Int     // minutes
+    var currentHR:   Double?
+    var currentHRV:  Double?
+    var baselineHR:  Double
+    var baselineHRV: Double
+    var score:       Int
+    var reasons:     [String]
+    var blocked:     Bool
 }
 
 // ── Adaptive baseline ─────────────────────────────────────────────────────────
-// Mirrors DEFAULT_BASELINE + updateBaseline() in AppContext.js
 private struct AdaptiveBaseline {
     var hrv:         Double = 50.0   // ms  — population average
     var hr:          Double = 68.0   // bpm — population average
@@ -44,34 +38,28 @@ class HealthManager: NSObject, ObservableObject {
     // ── Published state ───────────────────────────────────────────────────────
     @Published var hrv:          Double?         = nil
     @Published var hr:           Double?         = nil
-    @Published var activeEnergy: Double          = 0     // kcal in last 5 min
+    @Published var activeEnergy: Double          = 0
     @Published var isStressed:   Bool            = false
     @Published var isAuthorized: Bool            = false
     @Published var debugInfo:    StressDebugInfo = StressDebugInfo(
         currentHR: nil, currentHRV: nil,
         baselineHR: 68, baselineHRV: 50,
-        score: 0, reasons: [], blocked: false, cooldownRemaining: 0
+        score: 0, reasons: [], blocked: false
     )
 
-    private let store            = HKHealthStore()
-    private var hrvQuery:        HKAnchoredObjectQuery?
-    private var hrQuery:         HKAnchoredObjectQuery?
-    private var energyQuery:     HKAnchoredObjectQuery?
+    private let store        = HKHealthStore()
+    private var hrvQuery:    HKAnchoredObjectQuery?
+    private var hrQuery:     HKAnchoredObjectQuery?
+    private var energyQuery: HKAnchoredObjectQuery?
 
     // ── Adaptive baseline ─────────────────────────────────────────────────────
     private var baseline = AdaptiveBaseline()
 
-    // ── Persistence counter — mirrors persistenceRef in AppContext.js ─────────
+    // ── Persistence counter ───────────────────────────────────────────────────
     private var persistenceCount: Int = 0
 
-    // ── Cooldown — 15 min, matches AppContext COOLDOWN_MS ────────────────────
-    private var lastTrigger:   Date?           = nil
-    private let cooldown:      TimeInterval    = 15 * 60
-
     // ── Active / workout filter ───────────────────────────────────────────────
-    // > 5 kcal in 5 min = user is active (mirrors AppContext isActive check)
     private let activeEnergyThreshold: Double = 5.0
-
     var isActive: Bool { activeEnergy > activeEnergyThreshold }
 
     // ── Callback fired when trigger conditions are met ────────────────────────
@@ -177,17 +165,14 @@ class HealthManager: NSObject, ObservableObject {
 
     // ─────────────────────────────────────────────────────────────────────────
     // MARK: - Adaptive Baseline
-    // Mirrors updateBaseline() in AppContext.js — rolling weighted average.
     // ─────────────────────────────────────────────────────────────────────────
 
     private func updateBaseline(hrv: Double, hr: Double) {
         let n = baseline.sampleCount + 1
         if n < 5 {
-            // Simple average while warming up (< 5 samples)
             baseline.hrv = (baseline.hrv * Double(baseline.sampleCount) + hrv) / Double(n)
             baseline.hr  = (baseline.hr  * Double(baseline.sampleCount) + hr)  / Double(n)
         } else {
-            // Weighted rolling average — recent data weighted at 15%
             baseline.hrv = baseline.hrv * 0.85 + hrv * 0.15
             baseline.hr  = baseline.hr  * 0.85 + hr  * 0.15
         }
@@ -196,18 +181,14 @@ class HealthManager: NSObject, ObservableObject {
 
     // ─────────────────────────────────────────────────────────────────────────
     // MARK: - Stress Scoring
-    // Mirrors calculateStressScore() in AppContext.js exactly.
-    // Score >= 5 triggers intervention.
     // ─────────────────────────────────────────────────────────────────────────
 
     private func calculateStressScore() -> (score: Int, reasons: [String]) {
         var score   = 0
         var reasons = [String]()
-        let currentHRV = hrv
-        let currentHR  = hr
 
         // ── HRV drop below personal baseline ─────────────────────────────────
-        if let hrv = currentHRV {
+        if let hrv = hrv {
             if baseline.sampleCount >= 3 {
                 let drop = ((baseline.hrv - hrv) / baseline.hrv) * 100
                 if drop >= 25 {
@@ -215,14 +196,13 @@ class HealthManager: NSObject, ObservableObject {
                     reasons.append(String(format: "HRV %.0f%% below baseline (+2)", drop))
                 }
             } else if hrv < 30 {
-                // Fallback fixed floor while baseline is still warming up
                 score += 2
                 reasons.append(String(format: "HRV %.0fms below 30ms floor (+2)", hrv))
             }
         }
 
         // ── HR rise above personal baseline ──────────────────────────────────
-        if let hr = currentHR {
+        if let hr = hr {
             if baseline.sampleCount >= 3 {
                 let rise = hr - baseline.hr
                 if rise >= 15 {
@@ -243,7 +223,7 @@ class HealthManager: NSObject, ObservableObject {
             reasons.append("Workout filter blocked")
         }
 
-        // ── Persistence — conditions lasting 30-60s (2+ consecutive checks) ──
+        // ── Persistence — conditions lasting 2+ consecutive checks ────────────
         if persistenceCount >= 2 {
             score += 1
             reasons.append(String(format: "Persisting %d checks (+1)", persistenceCount))
@@ -254,55 +234,39 @@ class HealthManager: NSObject, ObservableObject {
 
     // ─────────────────────────────────────────────────────────────────────────
     // MARK: - Stress Evaluation
-    // Called whenever HR or HRV updates. Mirrors the monitoring interval
-    // logic in AppContext.startRealMonitoring().
     // ─────────────────────────────────────────────────────────────────────────
 
     private func evaluateStress() {
         guard let currentHRV = hrv, let currentHR = hr else { return }
 
-        // Cooldown check
-        let cooldownRemaining: TimeInterval
-        if let last = lastTrigger {
-            cooldownRemaining = max(0, cooldown - Date().timeIntervalSince(last))
-        } else {
-            cooldownRemaining = 0
-        }
-
-        // Single score calculation — used for both baseline gating and trigger logic
         let (score, reasons) = calculateStressScore()
-        let blocked = isActive || cooldownRemaining > 0
+        let blocked = isActive
 
-        // Update baseline only during calm readings — mirrors AppContext.js:
-        // `if (!rawStressed) updateBaseline(hrv, hr)`
+        // Update baseline only during calm readings
         if score < 5 {
             updateBaseline(hrv: currentHRV, hr: currentHR)
         }
 
-        // Publish debug info — mirrors AppContext setDebugInfo
         debugInfo = StressDebugInfo(
-            currentHR:         currentHR,
-            currentHRV:        currentHRV,
-            baselineHR:        baseline.hr.rounded(),
-            baselineHRV:       baseline.hrv.rounded(),
-            score:             score,
-            reasons:           reasons,
-            blocked:           blocked,
-            cooldownRemaining: Int((cooldownRemaining / 60).rounded())
+            currentHR:   currentHR,
+            currentHRV:  currentHRV,
+            baselineHR:  baseline.hr.rounded(),
+            baselineHRV: baseline.hrv.rounded(),
+            score:       score,
+            reasons:     reasons,
+            blocked:     blocked
         )
 
-        // ── Persistence tracking ──────────────────────────────────────────────
+        // Persistence tracking
         if score >= 5 {
             persistenceCount += 1
         } else {
             persistenceCount = 0
         }
 
-        // ── Trigger ───────────────────────────────────────────────────────────
-        // score >= 5, not in cooldown, not in active workout
-        if score >= 5 && cooldownRemaining == 0 && !isActive {
-            isStressed  = true
-            lastTrigger = Date()
+        // Trigger — score >= 5, not in active workout
+        if score >= 5 && !isActive {
+            isStressed       = true
             persistenceCount = 0
             onStressDetected?()
             ConnectivityManager.shared.sendStressDetectedToPhone()

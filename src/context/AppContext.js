@@ -193,7 +193,6 @@ export function AppProvider({children}) {
   const simulatingRef      = useRef(false);
   const monitorIntervalRef = useRef(null);
   const sessionStartRef    = useRef(null);
-  const lastTriggerRef     = useRef(null);
   const persistenceRef     = useRef(0);
   const baselineRef        = useRef({...DEFAULT_BASELINE});
   const sessionTimeoutRef  = useRef(null);
@@ -215,7 +214,6 @@ export function AppProvider({children}) {
     sensitivityRef.current = sensitivity;
   }, [sensitivity]);
 
-  const COOLDOWN_MS        = 15 * 60 * 1000; // 15 minutes
   const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
   // ── App state listener — reset session on background ─────────────────────
@@ -317,10 +315,6 @@ export function AppProvider({children}) {
         isResting:   !isActive,
       }));
 
-      // Check cooldown
-      const cooldownRemaining = lastTriggerRef.current
-        ? Math.max(0, COOLDOWN_MS - (Date.now() - lastTriggerRef.current))
-        : 0;
 
       // Update debug info
       setDebugInfo({
@@ -330,8 +324,7 @@ export function AppProvider({children}) {
         baselineHRV:       Math.round(baselineRef.current.hrv),
         score,
         reasons,
-        blocked:           isActive === true || cooldownRemaining > 0,
-        cooldownRemaining: Math.round(cooldownRemaining / 60000),
+        blocked:           result.isActive,
       });
 
       if (score >= 5) {
@@ -345,12 +338,7 @@ export function AppProvider({children}) {
 
       // BUG 2 FIX: use activePromptRef (current value) not activePrompt (stale closure).
       // Previously activePrompt was always null inside the interval.
-      if (
-        score >= 5 &&
-        cooldownRemaining === 0 &&
-        !simulatingRef.current &&
-        !activePromptRef.current
-      ) {
+      if (score >= 5 && !simulatingRef.current && !activePrompt) {
         triggerIntervention();
       }
     }, 30000); // Check every 30 seconds
@@ -376,7 +364,6 @@ export function AppProvider({children}) {
     const prompt  = prompts[Math.floor(Math.random() * prompts.length)];
     setActivePrompt(prompt);
     sessionStartRef.current = new Date();
-    lastTriggerRef.current  = Date.now();
     persistenceRef.current  = 0;
 
     // BUG 4a FIX: start session timeout immediately on trigger.
