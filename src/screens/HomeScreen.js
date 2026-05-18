@@ -1,11 +1,4 @@
 // src/screens/HomeScreen.js
-//
-// Fix from previous version:
-//   handleSimulate now calls WatchBridge.sendSimulateToWatch(isSecular)
-//   before running the iPhone flow. Previously the iPhone simulate button
-//   ran the local flow only — the Watch never knew it was pressed.
-//   WatchBridge.js had sendSimulateToWatch() ready but it was never called.
-
 import React, {useEffect, useRef, useState} from 'react';
 import {
   View,
@@ -37,16 +30,15 @@ export default function HomeScreen({navigation}) {
   const {
     isSecular, toggleMode, biometrics,
     isStressSimulating, simulateStress,
-    debugInfo, resetSession, activePrompt,
+    resetSession, activePrompt,
   } = useApp();
 
   const accentFaith = '#8a7055';
   const accentSec   = '#3a7090';
   const accent      = isSecular ? accentSec : accentFaith;
 
-  const [time, setTime]           = useState('');
-  const [dateStr, setDateStr]     = useState('');
-  const [showDebug, setShowDebug] = useState(false);
+  const [time, setTime]       = useState('');
+  const [dateStr, setDateStr] = useState('');
   const fadeIn = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -66,8 +58,6 @@ export default function HomeScreen({navigation}) {
   }, []);
 
   const handleSimulate = () => {
-    // Notify Watch so it runs the flow in parallel with the iPhone
-    // WatchBridge.sendSimulateToWatch was defined but never called here
     WatchBridge.sendSimulateToWatch(isSecular);
     simulateStress(prompt => navigation.navigate('Alert', {prompt}));
   };
@@ -162,57 +152,6 @@ export default function HomeScreen({navigation}) {
 
           <Text style={styles.simulateHint}>Triggers the full Selah flow</Text>
 
-          {/* Debug panel toggle */}
-          <TouchableOpacity onPress={() => setShowDebug(v => !v)} style={styles.debugToggle}>
-            <Text style={styles.debugToggleText}>
-              {showDebug ? '▲ Hide debug info' : '▼ Show debug info'}
-            </Text>
-          </TouchableOpacity>
-
-          {/* Debug panel */}
-          {showDebug && debugInfo && (
-            <View style={styles.debugPanel}>
-              <Text style={styles.debugTitle}>STRESS DETECTION DEBUG</Text>
-
-              <View style={styles.debugRow}>
-                <Text style={styles.debugKey}>Current HR</Text>
-                <Text style={styles.debugVal}>{debugInfo.currentHR ? `${Math.round(debugInfo.currentHR)} bpm` : '—'}</Text>
-              </View>
-              <View style={styles.debugRow}>
-                <Text style={styles.debugKey}>Baseline HR</Text>
-                <Text style={styles.debugVal}>{debugInfo.baselineHR} bpm</Text>
-              </View>
-              <View style={styles.debugRow}>
-                <Text style={styles.debugKey}>Current HRV</Text>
-                <Text style={styles.debugVal}>{debugInfo.currentHRV ? `${Math.round(debugInfo.currentHRV)} ms` : '—'}</Text>
-              </View>
-              <View style={styles.debugRow}>
-                <Text style={styles.debugKey}>Baseline HRV</Text>
-                <Text style={styles.debugVal}>{debugInfo.baselineHRV} ms</Text>
-              </View>
-              <View style={[styles.debugRow, {marginTop: 8}]}>
-                <Text style={styles.debugKey}>Score</Text>
-                <Text style={[styles.debugVal, {color: debugInfo.score >= 5 ? '#a04040' : '#6a8850', fontWeight: '700'}]}>
-                  {debugInfo.score} / 5
-                </Text>
-              </View>
-              <View style={styles.debugRow}>
-                <Text style={styles.debugKey}>Blocked</Text>
-                <Text style={styles.debugVal}>{debugInfo.blocked ? 'Yes' : 'No'}</Text>
-              </View>
-              {debugInfo.cooldownRemaining > 0 && (
-                <View style={styles.debugRow}>
-                  <Text style={styles.debugKey}>Cooldown</Text>
-                  <Text style={styles.debugVal}>{debugInfo.cooldownRemaining} min left</Text>
-                </View>
-              )}
-              <Text style={styles.debugReasonTitle}>Reasons:</Text>
-              {(debugInfo.reasons || []).map((r, i) => (
-                <Text key={i} style={styles.debugReason}>· {r}</Text>
-              ))}
-            </View>
-          )}
-
         </Animated.View>
       </ScrollView>
     </View>
@@ -276,18 +215,4 @@ const styles = StyleSheet.create({
   simulateDot:      {width: 7, height: 7, borderRadius: 4},
   simulateBtnText:  {fontSize: 12, fontWeight: '400', letterSpacing: 2.5, color: 'rgba(25,35,75,0.75)', textTransform: 'uppercase'},
   simulateHint:     {fontSize: 10, color: 'rgba(40,50,90,0.35)', letterSpacing: 0.5, marginTop: -12},
-  debugToggle:      {paddingVertical: 8},
-  debugToggleText:  {fontSize: 10, color: 'rgba(40,50,90,0.45)', letterSpacing: 1},
-  debugPanel: {
-    width: '100%', backgroundColor: 'rgba(255,255,255,0.30)',
-    borderRadius: 12, padding: 14,
-    borderWidth: 1, borderColor: 'rgba(40,50,90,0.15)',
-    gap: 5,
-  },
-  debugTitle:      {fontSize: 8, fontWeight: '700', letterSpacing: 2, color: 'rgba(40,50,90,0.55)', textTransform: 'uppercase', marginBottom: 6},
-  debugRow:        {flexDirection: 'row', justifyContent: 'space-between'},
-  debugKey:        {fontSize: 11, color: 'rgba(40,50,90,0.55)'},
-  debugVal:        {fontSize: 11, color: 'rgba(25,35,75,0.80)', fontWeight: '500'},
-  debugReasonTitle:{fontSize: 9, color: 'rgba(40,50,90,0.45)', marginTop: 8, marginBottom: 2},
-  debugReason:     {fontSize: 10, color: 'rgba(40,50,90,0.55)', paddingLeft: 4},
 });

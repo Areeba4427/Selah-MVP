@@ -1,13 +1,6 @@
 // SelahWatch/IdleView.swift
-//
-// Aligned with HomeScreen.js + AppContext.js debug panel.
-//
-// Additions vs previous version:
-//   - Debug panel (toggle) wired to health.debugInfo (StressDebugInfo)
-//   - Mirrors HomeScreen debugPanel row-for-row
 
 import SwiftUI
-import Combine
 
 struct IdleView: View {
 
@@ -18,10 +11,8 @@ struct IdleView: View {
     let isSecular:    Bool
     let stressIndex:  Double   // 0–100
 
-    @EnvironmentObject var health: HealthManager
     @State private var timeStr    = ""
     @State private var dotOpacity: Double = 1.0
-    @State private var showDebug  = false
 
     private let clockTimer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
 
@@ -164,86 +155,6 @@ struct IdleView: View {
                 .buttonStyle(PlainButtonStyle())
                 .opacity(isSimulating ? 0.50 : 1.0)
                 .padding(.bottom, 6)
-
-                // ── Debug toggle ──────────────────────────────────────────────
-                Button(action: { showDebug.toggle() }) {
-                    Text(showDebug ? "▲ Hide debug" : "▼ Debug info")
-                        .font(.system(size: 8, weight: .light))
-                        .tracking(1)
-                        .foregroundColor(Color(red: 0.25, green: 0.32, blue: 0.56).opacity(0.45))
-                }
-                .buttonStyle(PlainButtonStyle())
-                .padding(.bottom, 4)
-
-                // ── Debug panel ───────────────────────────────────────────────
-                // Mirrors HomeScreen.js debugPanel row-for-row.
-                // Reads from health.debugInfo (published by HealthManager).
-                if showDebug {
-                    let d = health.debugInfo
-                    VStack(alignment: .leading, spacing: 4) {
-
-                        Text("Stress detection debug")
-                            .font(.system(size: 7, weight: .bold))
-                            .tracking(1.5)
-                            .foregroundColor(Color(red: 0.25, green: 0.32, blue: 0.56).opacity(0.55))
-                            .textCase(.uppercase)
-                            .padding(.bottom, 2)
-
-                        DebugRow(label: "Current HR",
-                                 value: d.currentHR.map { "\(Int($0)) bpm" } ?? "—")
-                        DebugRow(label: "Baseline HR",
-                                 value: "\(Int(d.baselineHR)) bpm")
-                        DebugRow(label: "Current HRV",
-                                 value: d.currentHRV.map { "\(Int($0)) ms" } ?? "—")
-                        DebugRow(label: "Baseline HRV",
-                                 value: "\(Int(d.baselineHRV)) ms")
-
-                        Divider()
-                            .background(Color(red: 0.25, green: 0.32, blue: 0.56).opacity(0.15))
-                            .padding(.vertical, 2)
-
-                        HStack {
-                            Text("Score")
-                                .font(.system(size: 9))
-                                .foregroundColor(Color(red: 0.25, green: 0.32, blue: 0.56).opacity(0.55))
-                            Spacer()
-                            Text("\(d.score) / 5")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundColor(d.score >= 5
-                                    ? Color(red: 0.63, green: 0.25, blue: 0.25)
-                                    : Color(red: 0.42, green: 0.53, blue: 0.31))
-                        }
-
-                        DebugRow(label: "Blocked", value: d.blocked ? "Yes" : "No")
-
-                        if d.cooldownRemaining > 0 {
-                            DebugRow(label: "Cooldown",
-                                     value: "\(d.cooldownRemaining) min left")
-                        }
-
-                        Text("Reasons")
-                            .font(.system(size: 7, weight: .medium))
-                            .foregroundColor(Color(red: 0.25, green: 0.32, blue: 0.56).opacity(0.45))
-                            .padding(.top, 2)
-
-                        ForEach(d.reasons, id: \.self) { reason in
-                            Text("· \(reason)")
-                                .font(.system(size: 8))
-                                .foregroundColor(Color(red: 0.25, green: 0.32, blue: 0.56).opacity(0.55))
-                        }
-                    }
-                    .padding(8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.white.opacity(0.22))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color(red: 0.25, green: 0.32, blue: 0.56).opacity(0.15), lineWidth: 0.5)
-                            )
-                    )
-                    .padding(.horizontal, 2)
-                    .padding(.bottom, 8)
-                }
             }
             .padding(.horizontal, 8)
         }
@@ -285,22 +196,5 @@ struct IdleView: View {
     private func barWidth(for value: Double) -> CGFloat {
         let totalWidth: CGFloat = 168
         return CGFloat(min(max(value, 0), 100) / 100.0) * totalWidth
-    }
-}
-
-// ── Reusable debug row ────────────────────────────────────────────────────────
-private struct DebugRow: View {
-    let label: String
-    let value: String
-    var body: some View {
-        HStack {
-            Text(label)
-                .font(.system(size: 9))
-                .foregroundColor(Color(red: 0.25, green: 0.32, blue: 0.56).opacity(0.55))
-            Spacer()
-            Text(value)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundColor(Color(red: 0.15, green: 0.22, blue: 0.45).opacity(0.80))
-        }
     }
 }
