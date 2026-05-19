@@ -32,7 +32,7 @@ const CIRCLE_FULL  = 1.0;
 const CIRCLE_SMALL = 0.42;
 
 export default function BreatheScreen({navigation, route}) {
-  const {resolveStress} = useApp();
+  const {resolveStress, settings} = useApp();
   const prompt = route.params?.prompt;
 
   const [phase,      setPhase]      = useState(0);
@@ -70,8 +70,10 @@ export default function BreatheScreen({navigation, route}) {
 
       // ── Phase haptics — mirrors BreatheView.swift switch phaseIdx ──────────
       // Hold (phaseIdx === 1) = silence, intentional — no call made
-      if (phaseIdx === 0) HapticService.inhaleStart();
-      if (phaseIdx === 2) HapticService.exhaleStart();
+      if (settings?.hapticsEnabled) {
+        if (phaseIdx === 0) HapticService.inhaleStart();
+        if (phaseIdx === 2) HapticService.exhaleStart();
+      }
 
       const targetCircle   = phaseIdx === 2 ? CIRCLE_SMALL : CIRCLE_FULL;
       const targetCircleOp = phaseIdx === 2 ? 0.28 : phaseIdx === 1 ? 0.55 : 0.65;
@@ -120,7 +122,7 @@ export default function BreatheScreen({navigation, route}) {
         }
       }, 1000);
     },
-    [prompt, circleScale, circleOpacity, glowScale, glowOpacity],
+    [prompt, circleScale, circleOpacity, glowScale, glowOpacity, settings],
   );
 
   useEffect(() => {

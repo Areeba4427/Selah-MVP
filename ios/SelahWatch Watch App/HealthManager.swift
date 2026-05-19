@@ -5,9 +5,21 @@
 // Trigger logic:
 //   - Personal rolling baseline (HRV + HR)
 //   - Scoring: HRV drop +2, HR rise +2, low movement +1, persistence +1
-//   - Trigger when score >= 5
+//   - Trigger when score >= 5 (unchanged)
 //   - Workout/active energy filter
 //   - Baseline only updated on calm readings (score < 5)
+//
+// Fixes applied:
+//   FIX 1 — HRV predicate window widened from 5 → 15 minutes.
+//     Apple Watch writes HRV every 5–15 min at rest. A 5-min window
+//     missed samples arriving at the edge, so evaluateStress() ran
+//     far less often than expected in real wear conditions.
+//
+//   FIX 2 — Adaptive baseline kicks in after 1 calm sample (was 3).
+//     The fallback fixed thresholds (HRV < 30ms, HR > 88bpm) are too
+//     conservative for most users whose resting HRV is 40–70ms.
+//     With the old setting, the first 30–45 min of every session used
+//     fallbacks that would never fire, making early triggering impossible.
 
 import Foundation
 import HealthKit
@@ -26,8 +38,8 @@ struct StressDebugInfo {
 
 // ── Adaptive baseline ─────────────────────────────────────────────────────────
 private struct AdaptiveBaseline {
-    var hrv:         Double = 50.0   // ms  — population average
-    var hr:          Double = 68.0   // bpm — population average
+    var hrv:         Double = 50.0   // ms  — population average resting HRV
+    var hr:          Double = 68.0   // bpm — population average resting HR
     var sampleCount: Int    = 0
 }
 
@@ -59,6 +71,7 @@ class HealthManager: NSObject, ObservableObject {
     private var persistenceCount: Int = 0
 
     // ── Active / workout filter ───────────────────────────────────────────────
+    // > 5 kcal in 5 min = user is active
     private let activeEnergyThreshold: Double = 5.0
     var isActive: Bool { activeEnergy > activeEnergyThreshold }
 
@@ -70,6 +83,7 @@ class HealthManager: NSObject, ObservableObject {
     // ─────────────────────────────────────────────────────────────────────────
 
     func startMonitoring() {
+        loadBaseline()
         guard HKHealthStore.isHealthDataAvailable() else { return }
 
         let typesToRead: Set<HKObjectType> = [
@@ -100,8 +114,11 @@ class HealthManager: NSObject, ObservableObject {
     private func startHRVQuery() {
         guard let type = HKObjectType.quantityType(forIdentifier: .heartRateVariabilitySDNN) else { return }
         let query = HKAnchoredObjectQuery(
-            type: type, predicate: recentPredicate(minutes: 5),
-            anchor: nil, limit: HKObjectQueryNoLimit
+            type: type,
+            // FIX 1: widened from 5 → 15 minutes.
+            predicate: recentPredicate(minutes: 15),
+            anchor: nil,
+            limit: HKObjectQueryNoLimit
         ) { [weak self] _, samples, _, _, _ in self?.processHRV(samples: samples) }
         query.updateHandler = { [weak self] _, samples, _, _, _ in self?.processHRV(samples: samples) }
         store.execute(query)
@@ -177,10 +194,13 @@ class HealthManager: NSObject, ObservableObject {
             baseline.hr  = baseline.hr  * 0.85 + hr  * 0.15
         }
         baseline.sampleCount = min(n, 100)
+
+        saveBaseline()
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // MARK: - Stress Scoring
+    // Score >= 5 triggers intervention (unchanged).
     // ─────────────────────────────────────────────────────────────────────────
 
     private func calculateStressScore() -> (score: Int, reasons: [String]) {
@@ -189,13 +209,15 @@ class HealthManager: NSObject, ObservableObject {
 
         // ── HRV drop below personal baseline ─────────────────────────────────
         if let hrv = hrv {
-            if baseline.sampleCount >= 3 {
+            // FIX 2: adaptive threshold now kicks in after 1 calm sample (was 3).
+            if baseline.sampleCount >= 1 {
                 let drop = ((baseline.hrv - hrv) / baseline.hrv) * 100
                 if drop >= 25 {
                     score += 2
                     reasons.append(String(format: "HRV %.0f%% below baseline (+2)", drop))
                 }
             } else if hrv < 30 {
+                // Fallback — only before any calm reading is recorded
                 score += 2
                 reasons.append(String(format: "HRV %.0fms below 30ms floor (+2)", hrv))
             }
@@ -203,7 +225,7 @@ class HealthManager: NSObject, ObservableObject {
 
         // ── HR rise above personal baseline ──────────────────────────────────
         if let hr = hr {
-            if baseline.sampleCount >= 3 {
+            if baseline.sampleCount >= 1 {
                 let rise = hr - baseline.hr
                 if rise >= 15 {
                     score += 2
@@ -223,7 +245,7 @@ class HealthManager: NSObject, ObservableObject {
             reasons.append("Workout filter blocked")
         }
 
-        // ── Persistence — conditions lasting 2+ consecutive checks ────────────
+        // ── Persistence — 2+ consecutive elevated checks ──────────────────────
         if persistenceCount >= 2 {
             score += 1
             reasons.append(String(format: "Persisting %d checks (+1)", persistenceCount))
@@ -264,7 +286,7 @@ class HealthManager: NSObject, ObservableObject {
             persistenceCount = 0
         }
 
-        // Trigger — score >= 5, not in active workout
+        // Trigger — score >= 5, not in active workout (unchanged)
         if score >= 5 && !isActive {
             isStressed       = true
             persistenceCount = 0
@@ -298,4 +320,21 @@ class HealthManager: NSObject, ObservableObject {
         let start = Date().addingTimeInterval(-Double(minutes) * 60)
         return HKQuery.predicateForSamples(withStart: start, end: nil, options: .strictStartDate)
     }
+
+        // Save after every baseline update
+    private func saveBaseline() {
+        UserDefaults.standard.set(baseline.hrv,         forKey: "baseline_hrv")
+        UserDefaults.standard.set(baseline.hr,          forKey: "baseline_hr")
+        UserDefaults.standard.set(baseline.sampleCount, forKey: "baseline_count")
+    }
+
+    // Load on init
+    private func loadBaseline() {
+        let count = UserDefaults.standard.integer(forKey: "baseline_count")
+        guard count > 0 else { return }  // no saved data, keep defaults
+        baseline.hrv         = UserDefaults.standard.double(forKey: "baseline_hrv")
+        baseline.hr          = UserDefaults.standard.double(forKey: "baseline_hr")
+        baseline.sampleCount = count
+    }
+
 }

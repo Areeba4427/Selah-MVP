@@ -17,11 +17,14 @@ import {
   TouchableWithoutFeedback,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
+import {useApp} from '../context/AppContext';
 import HapticService from '../services/HapticService';
 
 export default function AlertScreen({navigation, route}) {
   const prompt     = route.params?.prompt;
   const skippedRef = useRef(false);
+  const {settings} = useApp();
+  const hapticsEnabled = settings?.hapticsEnabled;
 
   const lightOpacity = useRef(new Animated.Value(0)).current;
   const refOpacity   = useRef(new Animated.Value(0)).current;
@@ -32,6 +35,8 @@ export default function AlertScreen({navigation, route}) {
     navigation.replace('Breathe', {prompt});
   };
 
+  const {settings} = useApp();
+
   useEffect(() => {
     // Phase 0 — dark pause (0.8s)
     const t0 = setTimeout(() => {
@@ -39,7 +44,9 @@ export default function AlertScreen({navigation, route}) {
       // Phase 1 — gradient rises + haptic fires together
       // Haptic moved here from screen mount so it lands with the visual,
       // not 0.8s before it in the dark.
-      HapticService.detection();
+      if (hapticsEnabled) {
+        HapticService.detection();
+      }
 
       Animated.timing(lightOpacity, {
         toValue: 1, duration: 1600, useNativeDriver: true,

@@ -245,17 +245,27 @@ export function AppProvider({children}) {
 
   // ── Initialize ────────────────────────────────────────────────────────────
   useEffect(() => {
+    let unsubscribe = () => {};
     if (Platform.OS === 'ios') {
       HealthKitService.initialize().then(ready => {
         setHealthKitReady(ready);
         if (ready) startRealMonitoring();
       });
+      unsubscribe = WatchBridge.startListening(
+        () => {
+          console.log('[Selah] Watch -> Phone stress detected');
+        },
+        () => {
+          console.log('[Selah] Watch -> Phone session completed');
+        }
+      );
     } else {
       startSimulatedDrift();
     }
     return () => {
       if (monitorIntervalRef.current) clearInterval(monitorIntervalRef.current);
       if (sessionTimeoutRef.current)  clearTimeout(sessionTimeoutRef.current);
+      unsubscribe();
     };
   }, []);
 
@@ -312,7 +322,7 @@ export function AppProvider({children}) {
         hr:          hr  ?? prev.hr,
         hrv:         hrv ?? prev.hrv,
         stressIndex: derivedStressIndex,
-        isResting:   !isActive,
+        isResting:   isActive === false,
       }));
 
 
@@ -324,7 +334,7 @@ export function AppProvider({children}) {
         baselineHRV:       Math.round(baselineRef.current.hrv),
         score,
         reasons,
-        blocked:           result.isActive,
+        blocked:           isActive === true,
       });
 
       if (score >= 5) {
@@ -338,7 +348,7 @@ export function AppProvider({children}) {
 
       // BUG 2 FIX: use activePromptRef (current value) not activePrompt (stale closure).
       // Previously activePrompt was always null inside the interval.
-      if (score >= 5 && !simulatingRef.current && !activePrompt) {
+      if (score >= 5 && !simulatingRef.current && !activePromptRef.current) {
         triggerIntervention();
       }
     }, 30000); // Check every 30 seconds

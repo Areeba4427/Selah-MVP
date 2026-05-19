@@ -9,9 +9,11 @@ import {
   TouchableWithoutFeedback,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
+import {useApp} from '../context/AppContext';
 import HapticService from '../services/HapticService';
 
 export default function DoneScreen({navigation, route}) {
+  const {settings} = useApp();
   const closing  = route.params?.closing || "God's peace is yours";
   const doneRef  = useRef(false);
 
@@ -39,7 +41,9 @@ export default function DoneScreen({navigation, route}) {
             // 5. Hold 1.2s
             const t2 = setTimeout(() => {
               // 6. Soft haptic tap as Selah fades
-              HapticService.closing();
+              if (settings?.hapticsEnabled) {
+                HapticService.closing();
+              }
               // 7. Selah fades out
               Animated.timing(selahOpacity, {toValue: 0, duration: 1400, useNativeDriver: true}).start(() => {
                 setTimeout(finish, 300);
