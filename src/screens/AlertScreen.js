@@ -35,8 +35,6 @@ export default function AlertScreen({navigation, route}) {
     navigation.replace('Breathe', {prompt});
   };
 
-  const {settings} = useApp();
-
   useEffect(() => {
     // Phase 0 — dark pause (0.8s)
     const t0 = setTimeout(() => {
