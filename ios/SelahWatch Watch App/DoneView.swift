@@ -38,10 +38,10 @@ struct DoneView: View {
 
             // "Selah" in warm muted gold
             Text("Selah")
-                .font(.system(size: 20, weight: .light, design: .serif))
+                .font(.system(size: 20, weight: .regular, design: .serif))
                 .italic()
                 .tracking(4)
-                .foregroundColor(Color(red: 0.54, green: 0.44, blue: 0.33))
+                .foregroundColor(Color(red: 0.54, green: 0.44, blue: 0.33).opacity(0.98))
                 .opacity(selahOpacity)
         }
         .onAppear { startSequence() }
@@ -53,18 +53,18 @@ struct DoneView: View {
     private var closingText: some View {
         if closing == "God's thoughts are full of you" {
             (Text("God's thoughts are full of ")
-                .font(.system(size: 14, weight: .light))
-                .foregroundColor(Color(red: 0.18, green: 0.27, blue: 0.40))
+                .font(.system(size: 14, weight: .regular))
+                .foregroundColor(Color(red: 0.18, green: 0.27, blue: 0.40).opacity(0.92))
             + Text("you")
-                .font(.system(size: 14, weight: .light, design: .serif))
+                .font(.system(size: 14, weight: .regular, design: .serif))
                 .italic()
-                .foregroundColor(Color(red: 0.18, green: 0.27, blue: 0.40)))
+                .foregroundColor(Color(red: 0.18, green: 0.27, blue: 0.40).opacity(0.92)))
             .multilineTextAlignment(.center)
             .padding(.horizontal, 10)
         } else {
             Text(closing)
-                .font(.system(size: 14, weight: .light, design: .serif))
-                .foregroundColor(Color(red: 0.18, green: 0.27, blue: 0.40))
+                .font(.system(size: 14, weight: .regular, design: .serif))
+                .foregroundColor(Color(red: 0.18, green: 0.27, blue: 0.40).opacity(0.92))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 10)
         }

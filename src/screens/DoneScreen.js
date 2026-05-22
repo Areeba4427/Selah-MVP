@@ -108,15 +108,15 @@ const styles = StyleSheet.create({
   },
   closingText: {
     fontSize: 24,
-    fontWeight: '300',
+    fontWeight: '400',
     letterSpacing: 0.4,
-    color: 'rgba(30,40,80,0.80)',
+    color: 'rgba(30,40,80,0.92)',
     textAlign: 'center',
     lineHeight: 36,
   },
   selahText: {
     fontSize: 34,
-    fontWeight: '300',
+    fontWeight: '400',
     letterSpacing: 5,
     color: '#8a7055',
     textAlign: 'center',

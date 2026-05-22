@@ -176,30 +176,30 @@ const styles = StyleSheet.create({
   root: {flex: 1, alignItems: 'center', justifyContent: 'center'},
   phaseLabel: {
     position: 'absolute', top: '14%',
-    fontSize: 15, fontWeight: '300', letterSpacing: 5,
-    color: 'rgba(40,50,90,0.72)',
+    fontSize: 15, fontWeight: '400', letterSpacing: 5,
+    color: 'rgba(40,50,90,0.84)',
   },
   circleWrap: {width: 280, height: 280, alignItems: 'center', justifyContent: 'center'},
   outerGlow: {
     position: 'absolute', width: 380, height: 380, borderRadius: 190,
-    backgroundColor: 'rgba(255,255,255,0.30)',
+    backgroundColor: 'rgba(255,255,255,0.20)',
   },
   core: {
     position: 'absolute', width: 220, height: 220, borderRadius: 110,
-    backgroundColor: 'rgba(245,252,255,0.55)',
+    backgroundColor: 'rgba(245,252,255,0.72)',
   },
   phrase: {
     position: 'absolute', bottom: '11%',
-    fontSize: 17, fontWeight: '300', fontStyle: 'italic',
-    color: 'rgba(30,40,80,0.78)', textAlign: 'center',
+    fontSize: 17, fontWeight: '400', fontStyle: 'italic',
+    color: 'rgba(30,40,80,0.92)', textAlign: 'center',
     letterSpacing: 0.3, paddingHorizontal: 44, lineHeight: 26,
   },
   endBtn: {
     position: 'absolute', bottom: '4%',
     paddingVertical: 8, paddingHorizontal: 24,
     borderRadius: 999,
-    backgroundColor: 'rgba(160,64,64,0.15)',
-    borderWidth: 1, borderColor: 'rgba(160,64,64,0.30)',
+    backgroundColor: 'rgba(160,64,64,0.20)',
+    borderWidth: 1, borderColor: 'rgba(160,64,64,0.40)',
   },
   endBtnText: {fontSize: 12, color: '#a04040', fontWeight: '500', letterSpacing: 1},
 });

@@ -38,9 +38,9 @@ struct AlertView: View {
 
             // Scripture reference
             Text(prompt.source)
-                .font(.system(size: 16, weight: .light, design: .serif))
+                .font(.system(size: 16, weight: .regular, design: .serif))
                 .italic()
-                .foregroundColor(Color(red: 0.18, green: 0.27, blue: 0.40))
+                .foregroundColor(Color(red: 0.18, green: 0.27, blue: 0.40).opacity(0.92))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 12)
                 .opacity(refOpacity)

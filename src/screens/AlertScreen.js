@@ -116,9 +116,9 @@ const styles = StyleSheet.create({
   },
   referenceText: {
     fontSize: 26,
-    fontWeight: '300',
+    fontWeight: '400',
     letterSpacing: 0.8,
-    color: 'rgba(30,40,80,0.80)',
+    color: 'rgba(30,40,80,0.92)',
     textAlign: 'center',
     fontStyle: 'italic',
     lineHeight: 38,

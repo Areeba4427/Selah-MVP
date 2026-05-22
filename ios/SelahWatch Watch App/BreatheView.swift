@@ -62,9 +62,9 @@ struct BreatheView: View {
 
                 // Phase label — top
                 Text(phases[phaseIndex].name)
-                    .font(.system(size: 11, weight: .light))
+                    .font(.system(size: 11, weight: .medium))
                     .tracking(3)
-                    .foregroundColor(Color(red: 0.25, green: 0.40, blue: 0.60).opacity(0.75))
+                    .foregroundColor(Color(red: 0.25, green: 0.40, blue: 0.60).opacity(0.90))
                     .padding(.top, 6)
 
                 Spacer()
@@ -72,13 +72,13 @@ struct BreatheView: View {
                 // Breathing circle — center
                 ZStack {
                     Circle()
-                        .fill(Color.white.opacity(0.25))
+                        .fill(Color.white.opacity(0.20))
                         .frame(width: 90, height: 90)
                         .scaleEffect(circleScale * 1.3)
                         .opacity(glowOpacity)
 
                     Circle()
-                        .fill(Color(red: 0.96, green: 0.98, blue: 1.0).opacity(0.55))
+                        .fill(Color(red: 0.96, green: 0.98, blue: 1.0).opacity(0.72))
                         .frame(width: 80, height: 80)
                         .scaleEffect(circleScale)
                         .opacity(circleOpacity)
@@ -88,9 +88,9 @@ struct BreatheView: View {
 
                 // Phrase — bottom (stable per phase)
                 Text(phrase)
-                    .font(.system(size: 11, weight: .light, design: .serif))
+                    .font(.system(size: 11, weight: .regular, design: .serif))
                     .italic()
-                    .foregroundColor(Color(red: 0.18, green: 0.30, blue: 0.50).opacity(0.80))
+                    .foregroundColor(Color(red: 0.18, green: 0.30, blue: 0.50).opacity(0.92))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 8)
                     .padding(.bottom, 8)

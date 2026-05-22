@@ -34,9 +34,9 @@ struct IdleView: View {
                         .foregroundColor(Color(red: 0.18, green: 0.25, blue: 0.50).opacity(0.75))
 
                     Text("stress companion")
-                        .font(.system(size: 7, weight: .light))
+                        .font(.system(size: 7, weight: .regular))
                         .tracking(2)
-                        .foregroundColor(Color(red: 0.25, green: 0.32, blue: 0.56).opacity(0.40))
+                        .foregroundColor(Color(red: 0.25, green: 0.32, blue: 0.56).opacity(0.60))
                         .textCase(.uppercase)
                 }
                 .padding(.top, 6)
@@ -77,13 +77,13 @@ struct IdleView: View {
                             .textCase(.uppercase)
                         Spacer()
                         Text("\(Int(stressIndex))")
-                            .font(.system(size: 13, weight: .ultraLight))
+                            .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(stressIndex > 65
                                 ? Color(red: 0.63, green: 0.25, blue: 0.25)
-                                : Color(red: 0.15, green: 0.22, blue: 0.45).opacity(0.80))
+                                : Color(red: 0.15, green: 0.22, blue: 0.45).opacity(0.92))
                         + Text(" /100")
-                            .font(.system(size: 7, weight: .light))
-                            .foregroundColor(Color(red: 0.25, green: 0.32, blue: 0.56).opacity(0.40))
+                            .font(.system(size: 7, weight: .regular))
+                            .foregroundColor(Color(red: 0.25, green: 0.32, blue: 0.56).opacity(0.70))
                     }
 
                     ZStack(alignment: .leading) {
@@ -139,10 +139,10 @@ struct IdleView: View {
                                   : Color(red: 0.63, green: 0.25, blue: 0.25))
                             .frame(width: 5, height: 5)
                         Text(isSimulating ? "Detecting..." : "Simulate stress")
-                            .font(.system(size: 9, weight: .light))
+                            .font(.system(size: 9, weight: .medium))
                             .tracking(1.5)
                             .textCase(.uppercase)
-                            .foregroundColor(Color(red: 0.15, green: 0.22, blue: 0.45).opacity(0.70))
+                            .foregroundColor(Color(red: 0.15, green: 0.22, blue: 0.45).opacity(0.88))
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)

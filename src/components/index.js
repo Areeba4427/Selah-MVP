@@ -168,7 +168,7 @@ export function PromptCard({prompt, onPress}) {
 // ── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: 'rgba(255,255,255,0.03)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: Radius.lg,
@@ -200,7 +200,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
   ghostBtnText: {
     fontSize: 11,
@@ -213,7 +213,7 @@ const styles = StyleSheet.create({
   toggleLabel: {...Typography.labelSm, color: Colors.textDim},
   toggleTrack: {
     width: 52, height: 28,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: 'rgba(255,255,255,0.10)',
     borderRadius: 14, borderWidth: 1,
     justifyContent: 'center', paddingHorizontal: 3,
   },
@@ -222,7 +222,7 @@ const styles = StyleSheet.create({
   bioLabel: {...Typography.labelSm, color: Colors.textDim, width: 34},
   bioTrack: {
     flex: 1, height: 4,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: 'rgba(255,255,255,0.14)',
     borderRadius: 2, overflow: 'hidden',
   },
   bioFill: {height: '100%', borderRadius: 2},
@@ -238,7 +238,7 @@ const styles = StyleSheet.create({
   promptCard: {
     padding: 14,
     borderRadius: Radius.md,
-    backgroundColor: 'rgba(255,255,255,0.03)',
+    backgroundColor: 'rgba(255,255,255,0.10)',
     borderWidth: 1,
     borderColor: Colors.border,
     marginBottom: 8,
@@ -253,7 +253,7 @@ const styles = StyleSheet.create({
   promptBreathHint: {
     fontSize: 9,
     fontWeight: '400',
-    color: Colors.textDimmer,
+    color: Colors.textDim,
     fontStyle: 'italic',
     letterSpacing: 0.5,
   },

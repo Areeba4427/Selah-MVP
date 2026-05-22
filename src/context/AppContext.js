@@ -196,6 +196,7 @@ export function AppProvider({children}) {
   const persistenceRef     = useRef(0);
   const baselineRef        = useRef({...DEFAULT_BASELINE});
   const sessionTimeoutRef  = useRef(null);
+  const sessionBackgroundAtRef = useRef(null);
   const appStateRef        = useRef(AppState.currentState);
   const sensitivityRef     = useRef(sensitivity);
 
@@ -214,7 +215,7 @@ export function AppProvider({children}) {
     sensitivityRef.current = sensitivity;
   }, [sensitivity]);
 
-  const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+  const SESSION_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 
   // ── App state listener — reset session on background ─────────────────────
   useEffect(() => {
@@ -225,6 +226,7 @@ export function AppProvider({children}) {
       ) {
         // App went to background — start session timeout if session is active
         if (activePromptRef.current) {
+          sessionBackgroundAtRef.current = Date.now();
           if (sessionTimeoutRef.current) clearTimeout(sessionTimeoutRef.current);
           sessionTimeoutRef.current = setTimeout(() => {
             resetSession();
@@ -232,11 +234,19 @@ export function AppProvider({children}) {
         }
       }
       if (nextState === 'active') {
-        // App came back to foreground — cancel pending timeout
-        if (sessionTimeoutRef.current) {
+        // App came back to foreground — reset immediately if timeout already elapsed,
+        // otherwise cancel pending timeout.
+        if (
+          activePromptRef.current &&
+          sessionBackgroundAtRef.current &&
+          Date.now() - sessionBackgroundAtRef.current >= SESSION_TIMEOUT_MS
+        ) {
+          resetSession();
+        } else if (sessionTimeoutRef.current) {
           clearTimeout(sessionTimeoutRef.current);
           sessionTimeoutRef.current = null;
         }
+        sessionBackgroundAtRef.current = null;
       }
       appStateRef.current = nextState;
     });
@@ -380,6 +390,7 @@ export function AppProvider({children}) {
     // Previously only the AppState background transition started the timeout,
     // so sessions triggered while the app was active never auto-reset.
     if (sessionTimeoutRef.current) clearTimeout(sessionTimeoutRef.current);
+    sessionBackgroundAtRef.current = null;
     sessionTimeoutRef.current = setTimeout(() => {
       resetSession();
     }, SESSION_TIMEOUT_MS);
@@ -451,6 +462,7 @@ export function AppProvider({children}) {
     setActivePrompt(null);
     sessionStartRef.current = null;
     persistenceRef.current  = 0;
+    sessionBackgroundAtRef.current = null;
     console.log('[Selah] Session reset due to timeout/background/manual');
   };
 

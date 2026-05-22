@@ -35,10 +35,11 @@ struct ContentView: View {
     @State private var phase:            SelahPhase   = .idle
     @State private var prompt:           SelahPrompt? = nil
     @State private var hasActiveSession: Bool         = false
+    @State private var sessionBackgroundAt: Date?     = nil
 
-    // ── Session timeout — mirrors AppContext SESSION_TIMEOUT_MS (30 min) ──────
+    // ── Session timeout — mirrors AppContext SESSION_TIMEOUT_MS (10 min) ──────
     @State private var sessionTimer: DispatchWorkItem? = nil
-    private let SESSION_TIMEOUT: TimeInterval = 30 * 60
+    private let SESSION_TIMEOUT: TimeInterval = 10 * 60
 
     // ── Live stress index for IdleView bar ────────────────────────────────────
     private var liveStressIndex: Double {
@@ -103,9 +104,18 @@ struct ContentView: View {
         .onChange(of: scenePhase) { newPhase in
             switch newPhase {
             case .background, .inactive:
-                if hasActiveSession { startSessionTimeout() }
+                if hasActiveSession {
+                    sessionBackgroundAt = Date()
+                    startSessionTimeout()
+                }
             case .active:
-                cancelSessionTimeout()
+                if let backgroundAt = sessionBackgroundAt,
+                   Date().timeIntervalSince(backgroundAt) >= SESSION_TIMEOUT {
+                    resetSession()
+                } else {
+                    cancelSessionTimeout()
+                }
+                sessionBackgroundAt = nil
             @unknown default:
                 break
             }
@@ -130,6 +140,7 @@ struct ContentView: View {
     // ── Reset session ─────────────────────────────────────────────────────────
     private func resetSession() {
         cancelSessionTimeout()
+        sessionBackgroundAt = nil
         phase            = .idle
         prompt           = nil
         hasActiveSession = false

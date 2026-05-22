@@ -69,9 +69,9 @@ export const Radius = {
 };
 
 export const Typography = {
-  displayLg: {fontSize: 48, fontWeight: '300', letterSpacing: 2},
-  displayMd: {fontSize: 32, fontWeight: '300', letterSpacing: 1},
-  displaySm: {fontSize: 22, fontWeight: '300', letterSpacing: 0.5},
+  displayLg: {fontSize: 48, fontWeight: '400', letterSpacing: 2},
+  displayMd: {fontSize: 32, fontWeight: '400', letterSpacing: 1},
+  displaySm: {fontSize: 22, fontWeight: '400', letterSpacing: 0.5},
   bodyLg: {fontSize: 16, fontWeight: '400', lineHeight: 24},
   bodyMd: {fontSize: 14, fontWeight: '400', lineHeight: 21},
   bodySm: {fontSize: 12, fontWeight: '400', lineHeight: 18},
