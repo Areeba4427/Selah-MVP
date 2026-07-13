@@ -13,9 +13,13 @@
 //     AlertView.startSequence() fires it at Phase 1 (gradient rise, ~0.8s in).
 //     Calling it here too caused a double haptic on every Watch-detected trigger.
 //
-//   FIX 2 — activePrompt now uses @State var hasActiveSession.
-//     The previous (phase != .idle) always evaluated to false inside the
-//     .idle case block, so the "Session active" banner never showed.
+//   FIX 2 — IdleView's "Session active" banner removed as dead code.
+//     phase == .idle and hasActiveSession == true are mutually exclusive by
+//     construction (both are set together in triggerSession/resetSession), so
+//     the banner could never render. Manual exit now lives where the user
+//     actually is during a session: long-press in BreatheView, tap in
+//     AlertView/DoneView. hasActiveSession is kept — the session timeout
+//     logic still depends on it.
 
 import SwiftUI
 
@@ -57,9 +61,7 @@ struct ContentView: View {
             case .idle:
                 IdleView(
                     onSimulate:   { triggerSession() },
-                    onEndSession: { resetSession() },
                     isSimulating: false,
-                    activePrompt: hasActiveSession,   // FIX 2
                     isSecular:    connectivity.isSecular,
                     stressIndex:  liveStressIndex
                 )
@@ -73,9 +75,11 @@ struct ContentView: View {
 
             case .breathe:
                 if let p = prompt {
-                    BreatheView(prompt: p, onComplete: {
-                        phase = .done
-                    })
+                    BreatheView(
+                        prompt: p,
+                        onComplete: { phase = .done },
+                        onExit:     { resetSession() }   // FIX 2 — manual exit
+                    )
                 }
 
             case .done:

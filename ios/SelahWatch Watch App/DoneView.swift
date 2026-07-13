@@ -15,6 +15,17 @@ struct DoneView: View {
 
     @State private var closingOpacity: Double = 0
     @State private var selahOpacity:   Double = 0
+    @State private var didFinish:      Bool   = false
+
+    // The startSequence() timers keep running after an early tap — this guard
+    // stops the stale chain from calling onFinish (resetSession) again up to
+    // ~8s later, which would kill a new session triggered in that window.
+    // Same bug class as AppContext.js BUG 4b on the phone.
+    private func finishOnce() {
+        guard !didFinish else { return }
+        didFinish = true
+        onFinish()
+    }
 
     var body: some View {
         ZStack {
@@ -45,7 +56,7 @@ struct DoneView: View {
                 .opacity(selahOpacity)
         }
         .onAppear { startSequence() }
-        .onTapGesture { onFinish() }
+        .onTapGesture { finishOnce() }
     }
 
     // ── Closing text — italicise "you" for Psalm 139:17 ──────────────────────
@@ -94,7 +105,7 @@ struct DoneView: View {
                     }
                     // 5. Return to idle
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
-                        onFinish()
+                        finishOnce()
                     }
                 }
             }

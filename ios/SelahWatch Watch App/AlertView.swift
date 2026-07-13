@@ -15,6 +15,16 @@ struct AlertView: View {
 
     @State private var lightOpacity: Double = 0
     @State private var refOpacity:   Double = 0
+    @State private var didContinue:  Bool   = false
+
+    // The startSequence() timers keep running after an early tap — this guard
+    // stops the stale chain from firing onContinue a second time (which could
+    // yank a *new* session out of its alert phase).
+    private func continueOnce() {
+        guard !didContinue else { return }
+        didContinue = true
+        onContinue()
+    }
 
     var body: some View {
         ZStack {
@@ -46,13 +56,13 @@ struct AlertView: View {
                 .opacity(refOpacity)
         }
         .onAppear { startSequence() }
-        .onTapGesture  { onContinue() }
+        .onTapGesture  { continueOnce() }
     }
 
     private func startSequence() {
         // Phase 0 — dark pause
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-            HapticManager.shared.playDetection()   // ← add here
+            HapticManager.shared.playDetection()   // fires with the gradient rise
             // Phase 1 — gradient rises
             withAnimation(.easeInOut(duration: 1.6)) {
                 lightOpacity = 1
@@ -68,7 +78,7 @@ struct AlertView: View {
                         refOpacity = 0
                     }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                        onContinue()
+                        continueOnce()
                     }
                 }
             }

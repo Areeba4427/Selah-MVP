@@ -8,6 +8,9 @@
 //   - .onDisappear chained correctly inside body (was pasted outside closing brace)
 //   - switch phaseIdx haptic block moved inside runPhase() (was floating outside struct)
 //   - Phase haptics: playInhaleStart() on inhale, playExhaleStart() on exhale, silence on hold
+//   - Manual exit added: long-press (1.5s) reveals an End Session button —
+//     mirrors BreatheScreen.js on the phone. Previously the breathing phase
+//     was the only screen in the flow with no way out.
 
 import SwiftUI
 
@@ -29,6 +32,7 @@ struct BreatheView: View {
 
     let prompt:     SelahPrompt
     let onComplete: () -> Void
+    let onExit:     () -> Void   // manual end — long-press reveals the button
 
     @State private var phaseIndex:        Int     = 0
     @State private var cycleIndex:        Int     = 0
@@ -38,6 +42,7 @@ struct BreatheView: View {
     @State private var glowOpacity:       Double  = 0.08
     @State private var countdown:         Int     = 4
     @State private var completedNaturally: Bool   = false   // ← moved inside struct
+    @State private var showEndButton:      Bool   = false
 
     @State private var timer:        Timer? = nil
     @State private var sessionStart: Date   = Date()
@@ -95,6 +100,37 @@ struct BreatheView: View {
                     .padding(.horizontal, 8)
                     .padding(.bottom, 8)
             }
+
+            // End session — revealed by long-press, mirrors BreatheScreen.js
+            if showEndButton {
+                VStack {
+                    Spacer()
+                    Button(action: {
+                        timer?.invalidate()
+                        onExit()
+                    }) {
+                        Text("End Session")
+                            .font(.system(size: 10, weight: .medium))
+                            .tracking(1)
+                            .foregroundColor(Color(red: 0.63, green: 0.25, blue: 0.25))
+                            .padding(.vertical, 5)
+                            .padding(.horizontal, 14)
+                            .background(
+                                Capsule()
+                                    .fill(Color(red: 0.63, green: 0.25, blue: 0.25).opacity(0.12))
+                                    .overlay(
+                                        Capsule()
+                                            .stroke(Color(red: 0.63, green: 0.25, blue: 0.25).opacity(0.28), lineWidth: 0.5)
+                                    )
+                            )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .padding(.bottom, 2)
+                }
+            }
+        }
+        .onLongPressGesture(minimumDuration: 1.5) {
+            showEndButton = true
         }
         .onAppear {
             sessionStart = Date()

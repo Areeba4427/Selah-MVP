@@ -13,11 +13,11 @@
 //   is non-functional until HealthKit is ready.
 //
 //   Fix: isUserActive() now returns null when HealthKit is unavailable/uninitialised.
-//   AppContext.calculateStressScore() treats null isActive as "unknown" — it skips
+//   AppContext.assembleStressScore() treats null isActive as "unknown" — it skips
 //   the movement point entirely rather than freely awarding it.
 //   This makes the trigger score more conservative before permissions are granted.
 //
-//   calculateStressScore() in AppContext.js updated to handle null isActive:
+//   assembleStressScore() in AppContext.js updated to handle null isActive:
 //     if (isActive === false)  → +1 low movement (confirmed not active)
 //     if (isActive === null)   → skip point (unknown, don't award or block)
 //     if (isActive === true)   → workout filter blocked
@@ -141,7 +141,7 @@ const HealthKitService = {
   // Returns raw biometric readings only — { hrv, hr, isActive }.
   // isActive is now: true | false | null
   //   null means HealthKit is not ready yet — AppContext skips the movement point.
-  // AppContext.js owns all stress scoring (adaptive baseline, scoring, cooldown,
+  // AppContext.js owns all stress scoring (adaptive baseline, scoring,
   // persistence). Do NOT add isStressed or stressIndex here.
   checkStress: async () => {
     try {

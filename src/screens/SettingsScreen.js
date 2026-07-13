@@ -9,9 +9,10 @@
 //     Medium: HRV drops 25%+ / HR rises 15+ bpm  (default, matches AppContext)
 //     High:   HRV drops 20%+ / HR rises 10+ bpm
 //
-//   These map to the percentage drops in AppContext.calculateStressScore()
-//   and HealthManager.swift calculateStressScore(). Changing sensitivity
-//   passes the threshold values down so AppContext can adjust its scoring.
+//   These map to the percentage drops in AppContext.calculatePhysioScore().
+//   Note: sensitivity affects PHONE scoring only — the Watch's
+//   HealthManager.swift uses fixed Medium thresholds (25% / 15 bpm) and is
+//   not synced with this setting.
 
 import React from 'react';
 import {
@@ -58,7 +59,7 @@ export default function SettingsScreen() {
   const accent      = isSecular ? accentSec : accentFaith;
 
   // Adaptive baseline thresholds — aligned with AppContext scoring labels
-  // Medium (1) matches the default values in AppContext.calculateStressScore()
+  // Medium (1) matches the default values in AppContext.calculatePhysioScore()
   const thresholds = {
     0: {hrvDrop: '30%+', hrRise: '20+ bpm', label: 'Low'},
     1: {hrvDrop: '25%+', hrRise: '15+ bpm', label: 'Medium'},

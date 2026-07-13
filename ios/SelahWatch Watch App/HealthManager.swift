@@ -5,9 +5,9 @@
 // Trigger logic:
 //   - Personal rolling baseline (HRV + HR)
 //   - Scoring: HRV drop +2, HR rise +2, low movement +1, persistence +1
-//   - Trigger when score >= 5 (unchanged)
-//   - Workout/active energy filter
-//   - Baseline only updated on calm readings (score < 5)
+//   - Trigger when score >= 5 AND elevated physiology persisted 2+ checks / 30s+
+//   - Workout/active energy filter (rolling 5-minute window)
+//   - Baseline only updated on calm readings (score < 5, not in a workout)
 //
 // Fixes applied:
 //   FIX 1 — HRV predicate window widened from 5 → 15 minutes.
@@ -20,6 +20,22 @@
 //     conservative for most users whose resting HRV is 40–70ms.
 //     With the old setting, the first 30–45 min of every session used
 //     fallbacks that would never fire, making early triggering impossible.
+//
+//   FIX 3 — activeEnergy is now a true rolling 5-minute sum.
+//     An anchored query's update handler only delivers samples added since
+//     the last anchor. The old code summed just that latest batch, so during
+//     a workout activeEnergy was usually a fraction of a kcal and the
+//     workout filter almost never engaged.
+//
+//   FIX 4 — Baseline is never learned from workout readings.
+//     During a workout the movement point is withheld, capping the score
+//     at 4 — which passed the old "score < 5 = calm" gate. Every workout
+//     sample dragged baseline HR up / HRV down, masking later real stress.
+//
+//   FIX 5 — Persistence is a hard trigger gate, not just a +1.
+//     HRV + HR + low movement alone sum to 5, so a single elevated reading
+//     used to trigger instantly. Elevated physiology must now be seen on
+//     2+ consecutive checks spanning at least 30 seconds.
 
 import Foundation
 import HealthKit
@@ -68,11 +84,18 @@ class HealthManager: NSObject, ObservableObject {
     private var baseline = AdaptiveBaseline()
 
     // ── Persistence counter ───────────────────────────────────────────────────
+    // FIX 5: counts consecutive checks with elevated physiology (HRV or HR
+    // points scored). firstElevatedAt anchors the 30-second minimum so a burst
+    // of samples delivered together can't satisfy persistence instantly.
     private var persistenceCount: Int = 0
+    private var firstElevatedAt: Date? = nil
 
     // ── Active / workout filter ───────────────────────────────────────────────
-    // > 5 kcal in 5 min = user is active
+    // > 5 kcal in the last 5 min = user is active.
+    // FIX 3: individual samples are kept with their timestamps so the total is
+    // a true rolling window — a single update batch says nothing about it.
     private let activeEnergyThreshold: Double = 5.0
+    private var energySamples: [(date: Date, kcal: Double)] = []
     var isActive: Bool { activeEnergy > activeEnergyThreshold }
 
     // ── Callback fired when trigger conditions are met ────────────────────────
@@ -174,10 +197,25 @@ class HealthManager: NSObject, ObservableObject {
 
     private func processEnergy(samples: [HKSample]?) {
         guard let samples = samples as? [HKQuantitySample] else { return }
-        let total = samples.reduce(0.0) { $0 + $1.quantity.doubleValue(for: .kilocalorie()) }
-        DispatchQueue.main.async {
-            self.activeEnergy = total
+        // FIX 3: append the new batch, then recompute the rolling 5-min sum.
+        // Replacing activeEnergy with just this batch's total made the workout
+        // filter blind to everything delivered in earlier batches.
+        let entries: [(date: Date, kcal: Double)] = samples.map {
+            (date: $0.endDate, kcal: $0.quantity.doubleValue(for: .kilocalorie()))
         }
+        DispatchQueue.main.async {
+            self.energySamples.append(contentsOf: entries)
+            self.refreshActiveEnergy()
+        }
+    }
+
+    // Drop samples older than 5 minutes and re-sum. Also called from
+    // evaluateStress() so a finished workout decays out of the window even
+    // when no new energy samples arrive.
+    private func refreshActiveEnergy() {
+        let cutoff = Date().addingTimeInterval(-5 * 60)
+        energySamples.removeAll { $0.date < cutoff }
+        activeEnergy = energySamples.reduce(0.0) { $0 + $1.kcal }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -200,10 +238,12 @@ class HealthManager: NSObject, ObservableObject {
 
     // ─────────────────────────────────────────────────────────────────────────
     // MARK: - Stress Scoring
-    // Score >= 5 triggers intervention (unchanged).
+    // Score >= 5 AND persisted elevated physiology triggers intervention.
     // ─────────────────────────────────────────────────────────────────────────
 
-    private func calculateStressScore() -> (score: Int, reasons: [String]) {
+    // HRV + HR points only — this is what the persistence counter tracks.
+    // Movement and persistence points are added in evaluateStress().
+    private func calculatePhysioScore() -> (score: Int, reasons: [String]) {
         var score   = 0
         var reasons = [String]()
 
@@ -237,20 +277,6 @@ class HealthManager: NSObject, ObservableObject {
             }
         }
 
-        // ── Low movement (not in workout) ─────────────────────────────────────
-        if !isActive {
-            score += 1
-            reasons.append("Low movement (+1)")
-        } else {
-            reasons.append("Workout filter blocked")
-        }
-
-        // ── Persistence — 2+ consecutive elevated checks ──────────────────────
-        if persistenceCount >= 2 {
-            score += 1
-            reasons.append(String(format: "Persisting %d checks (+1)", persistenceCount))
-        }
-
         return (score, reasons)
     }
 
@@ -261,11 +287,45 @@ class HealthManager: NSObject, ObservableObject {
     private func evaluateStress() {
         guard let currentHRV = hrv, let currentHR = hr else { return }
 
-        let (score, reasons) = calculateStressScore()
-        let blocked = isActive
+        // FIX 3: decay the energy window even if no new samples arrived,
+        // so a finished workout stops blocking triggers after 5 minutes.
+        refreshActiveEnergy()
 
-        // Update baseline only during calm readings
-        if score < 5 {
+        // ── 1. Physiological signals drive the persistence counter ───────────
+        // FIX 5: persistence tracks elevated physiology (any HRV/HR points),
+        // updated BEFORE the full score so its +1 applies from the 2nd check.
+        // The old counter tracked score >= 5 — which the score reached on a
+        // single reading, so persistence never actually gated anything.
+        let (physioScore, physioReasons) = calculatePhysioScore()
+
+        if physioScore >= 2 {
+            if persistenceCount == 0 { firstElevatedAt = Date() }
+            persistenceCount += 1
+        } else {
+            persistenceCount = 0
+            firstElevatedAt  = nil
+        }
+
+        // ── 2. Full score ─────────────────────────────────────────────────────
+        var score   = physioScore
+        var reasons = physioReasons
+
+        if !isActive {
+            score += 1
+            reasons.append("Low movement (+1)")
+        } else {
+            reasons.append("Workout filter blocked")
+        }
+
+        if persistenceCount >= 2 {
+            score += 1
+            reasons.append(String(format: "Persisting %d checks (+1)", persistenceCount))
+        }
+
+        // ── 3. Baseline — calm readings only, never during a workout ─────────
+        // FIX 4: workout readings capped at score 4 used to pass the old
+        // "score < 5" gate and drag the baseline toward workout HR/HRV.
+        if score < 5 && !isActive {
             updateBaseline(hrv: currentHRV, hr: currentHR)
         }
 
@@ -276,20 +336,20 @@ class HealthManager: NSObject, ObservableObject {
             baselineHRV: baseline.hrv.rounded(),
             score:       score,
             reasons:     reasons,
-            blocked:     blocked
+            blocked:     isActive
         )
 
-        // Persistence tracking
-        if score >= 5 {
-            persistenceCount += 1
-        } else {
-            persistenceCount = 0
-        }
+        // ── 4. Trigger — score + persistence + workout gates ──────────────────
+        // FIX 5: elevated physiology must span 2+ consecutive checks AND at
+        // least 30 seconds of wall-clock time ("is it lasting long enough
+        // to matter?").
+        let persistedLongEnough = persistenceCount >= 2
+            && (firstElevatedAt.map { Date().timeIntervalSince($0) >= 30 } ?? false)
 
-        // Trigger — score >= 5, not in active workout (unchanged)
-        if score >= 5 && !isActive {
+        if score >= 5 && persistedLongEnough && !isActive {
             isStressed       = true
             persistenceCount = 0
+            firstElevatedAt  = nil
             onStressDetected?()
             ConnectivityManager.shared.sendStressDetectedToPhone()
         } else if score < 5 {
@@ -314,6 +374,7 @@ class HealthManager: NSObject, ObservableObject {
     func resetStress() {
         isStressed       = false
         persistenceCount = 0
+        firstElevatedAt  = nil
     }
 
     private func recentPredicate(minutes: Int) -> NSPredicate {

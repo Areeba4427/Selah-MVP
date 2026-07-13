@@ -24,7 +24,7 @@
 //   Fix: added sensitivity state (default 1 = Medium), setSensitivity(),
 //   settings state (hapticsEnabled/breathingExercises/autoDetect/quietHours),
 //   updateSetting(), and all four passed in Provider value.
-//   calculateStressScore() now reads sensitivity thresholds from context so
+//   calculatePhysioScore() now reads sensitivity thresholds from context so
 //   changing sensitivity in Settings actually affects trigger logic.
 //
 // BUG 4a — session timeout not started on auto-trigger (stuck session)
@@ -39,6 +39,29 @@
 //   app and started a new session, the old setTimeout callback could fire later
 //   and reset the new session.
 //   Fix: resetSession() now clears sessionTimeoutRef at the top.
+//
+// BUG 5 — settings.autoDetect read from a stale closure
+//   The monitoring interval captured `settings` from the first render, so
+//   toggling Auto-detection off in Settings never actually stopped
+//   auto-triggering. Fixed with settingsRef — same pattern as activePromptRef
+//   and sensitivityRef.
+//
+// BUG 6 — workout readings poisoned the "calm" baseline
+//   Baseline updates were gated on score < 5 only. During a workout the
+//   movement point is withheld, capping the score at 4 — so workout HR/HRV
+//   passed the gate and dragged the baseline toward workout levels, masking
+//   later real stress. Baseline updates now also require isActive !== true.
+//
+// BUG 7 — persistence was not actually required (or was impossible)
+//   The counter tracked score >= 5, but HRV+HR+movement alone reach 5, so a
+//   single 30s check could trigger with zero persistence. And with movement
+//   unknown (isActive null) the score capped at 4, so the counter never
+//   incremented and triggering was impossible. Persistence now tracks
+//   elevated physiology (any HRV/HR points) and is a hard trigger gate
+//   (2+ consecutive checks ≈ 60s at the 30s interval), matching the client's
+//   "conditions persist 30–60s" requirement. The trigger also gained an
+//   explicit isActive !== true gate, since persistence can now accumulate
+//   during workouts.
 
 import React, {createContext, useContext, useState, useEffect, useRef} from 'react';
 import {Platform, AppState} from 'react-native';
@@ -89,7 +112,7 @@ const DEFAULT_BASELINE = {
 
 // ── Sensitivity thresholds ────────────────────────────────────────────────────
 // Indexed 0 (Low) | 1 (Medium, default) | 2 (High).
-// Used by calculateStressScore() — changing sensitivity in Settings immediately
+// Used by calculatePhysioScore() — changing sensitivity in Settings immediately
 // affects what HRV drop % and HR rise bpm count as +2 toward the trigger score.
 const SENSITIVITY_THRESHOLDS = {
   0: {hrvDropPct: 30, hrRiseBpm: 20}, // Low    — only strong signals
@@ -98,9 +121,13 @@ const SENSITIVITY_THRESHOLDS = {
 };
 
 // ── Stress Scoring ────────────────────────────────────────────────────────────
-// Score >= 5 triggers intervention.
-// Now accepts sensitivityLevel so threshold changes in Settings take effect.
-function calculateStressScore({hrv, hr, baseline, isActive, persistenceCount, sensitivityLevel = 1}) {
+// Score >= 5 AND 2+ persistent elevated checks triggers intervention.
+// Split in two (BUG 7): the physiological part (HRV + HR) is what the
+// persistence counter tracks; movement and persistence points are layered on
+// top in assembleStressScore().
+
+// HRV + HR points only. Accepts sensitivityLevel so Settings changes apply.
+function calculatePhysioScore({hrv, hr, baseline, sensitivityLevel = 1}) {
   let score = 0;
   const reasons = [];
   const thresholds = SENSITIVITY_THRESHOLDS[sensitivityLevel] ?? SENSITIVITY_THRESHOLDS[1];
@@ -133,6 +160,14 @@ function calculateStressScore({hrv, hr, baseline, isActive, persistenceCount, se
       reasons.push(`HR ${hr.toFixed(0)}bpm above 88 floor (+2)`);
     }
   }
+
+  return {score, reasons};
+}
+
+// Full score: physio + movement + persistence.
+function assembleStressScore({physio, isActive, persistenceCount}) {
+  let score = physio.score;
+  const reasons = [...physio.reasons];
 
   // Low movement (not in workout)
   // isActive: true = workout (block), false = confirmed inactive (+1), null = unknown (skip)
@@ -187,7 +222,6 @@ export function AppProvider({children}) {
     score:             0,
     reasons:           [],
     blocked:           false,
-    cooldownRemaining: 0,
   });
 
   const simulatingRef      = useRef(false);
@@ -214,6 +248,14 @@ export function AppProvider({children}) {
   useEffect(() => {
     sensitivityRef.current = sensitivity;
   }, [sensitivity]);
+
+  // BUG 5 FIX: settings ref for the same reason — the interval closure would
+  // otherwise read the first render's settings forever, making the
+  // Auto-detection toggle a no-op.
+  const settingsRef = useRef(settings);
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
 
   const SESSION_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -306,20 +348,31 @@ export function AppProvider({children}) {
       // Removed the broken destructure of isStressed / result.stressIndex.
       const {hrv, hr, isActive} = await HealthKitService.checkStress();
 
-      // Calculate adaptive score first — used for baseline gating, debug, and trigger
-      const {score, reasons} = calculateStressScore({
+      // BUG 7 FIX: persistence tracks elevated physiology (any HRV/HR points),
+      // updated BEFORE the full score so its +1 applies from the 2nd check.
+      const physio = calculatePhysioScore({
         hrv,
         hr,
         baseline:         baselineRef.current,
-        isActive,
-        persistenceCount: persistenceRef.current,
         sensitivityLevel: sensitivityRef.current,
       });
+      if (physio.score >= 2) {
+        persistenceRef.current += 1;
+      } else {
+        persistenceRef.current = 0;
+      }
 
-      // BUG 1 FIX: baseline updated when score < 5 (calm reading),
-      // not when rawStressed was falsy (which was always true since it was undefined).
-      // This mirrors HealthManager.swift evaluateStress() exactly.
-      if (score < 5) {
+      const {score, reasons} = assembleStressScore({
+        physio,
+        isActive,
+        persistenceCount: persistenceRef.current,
+      });
+
+      // BUG 1 FIX: baseline updated when score < 5 (calm reading).
+      // BUG 6 FIX: ...and never during a workout — workout readings capped at
+      // score 4 used to pass this gate and drag the baseline toward workout
+      // HR/HRV. Mirrors HealthManager.swift evaluateStress().
+      if (score < 5 && isActive !== true) {
         updateBaseline(hrv, hr);
       }
 
@@ -347,18 +400,21 @@ export function AppProvider({children}) {
         blocked:           isActive === true,
       });
 
-      if (score >= 5) {
-        persistenceRef.current += 1;
-      } else {
-        persistenceRef.current = 0;
-      }
-
       // Respect autoDetect setting
-      if (!settings.autoDetect) return;
+      // BUG 5 FIX: read through settingsRef, not the stale `settings` closure.
+      if (!settingsRef.current.autoDetect) return;
 
       // BUG 2 FIX: use activePromptRef (current value) not activePrompt (stale closure).
-      // Previously activePrompt was always null inside the interval.
-      if (score >= 5 && !simulatingRef.current && !activePromptRef.current) {
+      // BUG 7 FIX: persistence is a hard gate — 2+ consecutive elevated checks
+      // (≈60s) — and the workout gate is explicit, since persistence can now
+      // accumulate while isActive is true.
+      if (
+        score >= 5 &&
+        persistenceRef.current >= 2 &&
+        isActive !== true &&
+        !simulatingRef.current &&
+        !activePromptRef.current
+      ) {
         triggerIntervention();
       }
     }, 30000); // Check every 30 seconds

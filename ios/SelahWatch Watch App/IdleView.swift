@@ -5,9 +5,7 @@ import SwiftUI
 struct IdleView: View {
 
     let onSimulate:   () -> Void
-    let onEndSession: () -> Void
     let isSimulating: Bool
-    let activePrompt: Bool
     let isSecular:    Bool
     let stressIndex:  Double   // 0–100
 
@@ -103,32 +101,6 @@ struct IdleView: View {
                 .padding(.horizontal, 2)
 
                 Spacer(minLength: 6)
-
-                // ── Active session warning ────────────────────────────────────
-                if activePrompt {
-                    Button(action: onEndSession) {
-                        HStack(spacing: 4) {
-                            Text("⚠")
-                                .font(.system(size: 9))
-                            Text("Session active · Tap to end")
-                                .font(.system(size: 8, weight: .medium))
-                                .tracking(0.3)
-                        }
-                        .foregroundColor(Color(red: 0.63, green: 0.25, blue: 0.25))
-                        .padding(.vertical, 5)
-                        .padding(.horizontal, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color(red: 0.63, green: 0.25, blue: 0.25).opacity(0.12))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(Color(red: 0.63, green: 0.25, blue: 0.25).opacity(0.28), lineWidth: 0.5)
-                                )
-                        )
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    .padding(.bottom, 4)
-                }
 
                 // ── Simulate button ───────────────────────────────────────────
                 Button(action: isSimulating ? {} : onSimulate) {
