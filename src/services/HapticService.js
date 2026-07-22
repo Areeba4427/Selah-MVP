@@ -13,11 +13,9 @@
 //   One soft tap, long breath-space, two descending nudges (~2.0s total)
 //   Watch equivalent: click → 1100ms → directionDown → 350ms → directionDown
 //
-// Breathing phase cues — subtle tactile anchor per phase:
-//   Inhale: single soft upward nudge
-//   Exhale: single soft downward nudge
-//   Hold:   silence (intentional)
-//   Watch equivalent: playInhaleStart() / playExhaleStart()
+// Haptics fire ONLY at these two bookend moments. The breathing session in
+// between is intentionally silent — per-breath inhale/exhale cues were
+// removed after client feedback that the session vibrated throughout.
 
 import {Platform, Vibration, NativeModules} from 'react-native';
 
@@ -50,28 +48,6 @@ const HapticService = {
       // One opening tap, breath-space, two soft descending taps
       // Mirrors Watch: click → 1100ms → directionDown → 350ms → directionDown
       Vibration.vibrate([0, 60, 1100, 60, 350, 40]);
-    }
-  },
-
-  // ── Breathing phase cues ──────────────────────────────────────────────────
-  // Called at the start of each breathing phase in BreatheScreen.
-  // Mirrors HapticManager.swift playInhaleStart() / playExhaleStart().
-  // Hold phase = no call (silence is intentional).
-  inhaleStart: () => {
-    if (Platform.OS === 'ios' && SelahHaptics && SelahHaptics.playInhaleStart) {
-      SelahHaptics.playInhaleStart();
-    } else {
-      // Single very short buzz — directional up feeling
-      Vibration.vibrate([0, 40]);
-    }
-  },
-
-  exhaleStart: () => {
-    if (Platform.OS === 'ios' && SelahHaptics && SelahHaptics.playExhaleStart) {
-      SelahHaptics.playExhaleStart();
-    } else {
-      // Single very short buzz — slightly softer than inhale
-      Vibration.vibrate([0, 30]);
     }
   },
 

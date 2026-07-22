@@ -2,8 +2,16 @@
 //
 // Two-way communication between Watch and iPhone.
 //
-// Watch → iPhone:  stress detected on Watch, notify iPhone to update its UI
-// iPhone → Watch:  simulate button pressed on iPhone, Watch shows flow
+// Watch → iPhone:  stress detected on Watch, session completed
+// iPhone → Watch:  simulate trigger (live message) + settings snapshot
+//                  {isSecular, hapticsEnabled, autoDetect, sensitivity}
+//
+// Settings arrive on two paths, both funneled through applySettings():
+//   - live sendMessage      — instant, but only while the Watch is reachable
+//   - application context   — reliable: iOS queues the latest snapshot and
+//     delivers it when possible; receivedApplicationContext also survives
+//     relaunches, so settings are re-applied on every activation.
+// Every value is persisted on the Watch so it survives restarts offline.
 //
 // Uses WatchConnectivity framework.
 
@@ -16,7 +24,7 @@ class ConnectivityManager: NSObject, ObservableObject, WCSessionDelegate {
     static let shared = ConnectivityManager()
 
     @Published var incomingPrompt: SelahPrompt? = nil
-    @Published var isSecular: Bool = false
+    @Published var isSecular: Bool = UserDefaults.standard.bool(forKey: "is_secular")
 
     private override init() {
         super.init()
@@ -46,13 +54,29 @@ class ConnectivityManager: NSObject, ObservableObject, WCSessionDelegate {
         )
     }
 
-    // ── iPhone → Watch: receive stress trigger or mode change ─────────────────
+    // ── Apply a settings snapshot ─────────────────────────────────────────────
+    // Shared by live messages, application context, and activation. Each key
+    // is optional so partial messages (e.g. mode-only) still work.
+    private func applySettings(_ dict: [String: Any]) {
+        if let secular = dict["isSecular"] as? Bool {
+            isSecular = secular
+            UserDefaults.standard.set(secular, forKey: "is_secular")
+        }
+        if let haptics = dict["hapticsEnabled"] as? Bool {
+            HapticManager.shared.isEnabled = haptics          // persists itself
+        }
+        if let autoDetect = dict["autoDetect"] as? Bool {
+            HealthManager.shared.autoDetectEnabled = autoDetect
+        }
+        if let sensitivity = dict["sensitivity"] as? Int {
+            HealthManager.shared.sensitivityLevel = sensitivity
+        }
+    }
+
+    // ── iPhone → Watch: live message (simulate trigger / setting change) ──────
     func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
         DispatchQueue.main.async {
-            // iPhone sends mode setting
-            if let secular = message["isSecular"] as? Bool {
-                self.isSecular = secular
-            }
+            self.applySettings(message)
 
             // iPhone simulate button pressed — trigger flow on Watch
             if let event = message["event"] as? String, event == "simulateStress" {
@@ -67,8 +91,26 @@ class ConnectivityManager: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    // ── iPhone → Watch: settings snapshot via application context ─────────────
+    // Delivered even if the Watch was unreachable when the user changed the
+    // setting on the phone.
+    func session(_ session: WCSession,
+                 didReceiveApplicationContext applicationContext: [String: Any]) {
+        DispatchQueue.main.async {
+            self.applySettings(applicationContext)
+        }
+    }
+
     // ── Required WCSessionDelegate methods ────────────────────────────────────
     func session(_ session: WCSession,
                  activationDidCompleteWith activationState: WCSessionActivationState,
-                 error: Error?) {}
+                 error: Error?) {
+        // Re-apply the last snapshot the phone ever sent — this is what makes
+        // settings stick across Watch app relaunches even while offline.
+        DispatchQueue.main.async {
+            if !session.receivedApplicationContext.isEmpty {
+                self.applySettings(session.receivedApplicationContext)
+            }
+        }
+    }
 }

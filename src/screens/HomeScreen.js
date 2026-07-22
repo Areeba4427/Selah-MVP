@@ -30,7 +30,7 @@ export default function HomeScreen({navigation}) {
   const {
     isSecular, toggleMode, biometrics,
     isStressSimulating, simulateStress,
-    resetSession, activePrompt,
+    resetSession, activePrompt, settings,
   } = useApp();
 
   const accentFaith = '#8a7055';
@@ -58,7 +58,7 @@ export default function HomeScreen({navigation}) {
   }, []);
 
   const handleSimulate = () => {
-    WatchBridge.sendSimulateToWatch(isSecular);
+    WatchBridge.sendSimulateToWatch(isSecular, settings?.hapticsEnabled ?? true);
     simulateStress(prompt => navigation.navigate('Alert', {prompt}));
   };
 

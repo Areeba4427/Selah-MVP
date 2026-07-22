@@ -9,10 +9,10 @@
 //     Medium: HRV drops 25%+ / HR rises 15+ bpm  (default, matches AppContext)
 //     High:   HRV drops 20%+ / HR rises 10+ bpm
 //
-//   These map to the percentage drops in AppContext.calculatePhysioScore().
-//   Note: sensitivity affects PHONE scoring only — the Watch's
-//   HealthManager.swift uses fixed Medium thresholds (25% / 15 bpm) and is
-//   not synced with this setting.
+//   These map to the percentage drops in AppContext.calculatePhysioScore()
+//   AND to HealthManager.swift on the Watch — AppContext syncs the settings
+//   snapshot {isSecular, hapticsEnabled, autoDetect, sensitivity} to the
+//   Watch via application context whenever any of it changes.
 
 import React from 'react';
 import {
@@ -50,7 +50,7 @@ export default function SettingsScreen() {
     toggleMode,
     sensitivity,        // 0 | 1 | 2  — pulled from AppContext
     setSensitivity,     // (level: 0|1|2) => void — add to AppContext
-    settings,           // {hapticsEnabled, breathingExercises, autoDetect, quietHours}
+    settings,           // {hapticsEnabled, autoDetect}
     updateSetting,      // (key, value) => void — add to AppContext
   } = useApp();
 
@@ -151,24 +151,10 @@ export default function SettingsScreen() {
             accent={accent}
           />
           <SettingRow
-            label="Guided breathing"
-            desc="4-4-6 breathing exercise after stress detected"
-            value={settings?.breathingExercises ?? true}
-            onToggle={() => updateSetting('breathingExercises', !(settings?.breathingExercises ?? true))}
-            accent={accent}
-          />
-          <SettingRow
             label="Auto-detection"
             desc="Adaptive baseline stress monitoring"
             value={settings?.autoDetect ?? true}
             onToggle={() => updateSetting('autoDetect', !(settings?.autoDetect ?? true))}
-            accent={accent}
-          />
-          <SettingRow
-            label="Quiet hours"
-            desc="Suppress alerts between 10PM – 7AM"
-            value={settings?.quietHours ?? false}
-            onToggle={() => updateSetting('quietHours', !(settings?.quietHours ?? false))}
             accent={accent}
             last
           />

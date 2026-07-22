@@ -1,10 +1,10 @@
 // src/screens/BreatheScreen.js
 //
 // Change from previous version:
-//   Phase haptics added to runPhase — mirrors BreatheView.swift switch phaseIdx:
-//     Inhale → HapticService.inhaleStart()   (Watch: playInhaleStart)
-//     Hold   → silence                        (Watch: no haptic, intentional)
-//     Exhale → HapticService.exhaleStart()   (Watch: playExhaleStart)
+//   Phase haptics REMOVED (client feedback: the session should be quiet —
+//   per-breath cues made it vibrate every 4-6s throughout). Haptics now only
+//   bookend the flow: detection on AlertScreen, closing on DoneScreen.
+//   Mirrors BreatheView.swift.
 
 import React, {useEffect, useRef, useState, useCallback} from 'react';
 import {
@@ -19,7 +19,6 @@ import {
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import {useApp} from '../context/AppContext';
-import HapticService from '../services/HapticService';
 
 const CYCLES = 3;
 const PHASES = [
@@ -32,7 +31,7 @@ const CIRCLE_FULL  = 1.0;
 const CIRCLE_SMALL = 0.42;
 
 export default function BreatheScreen({navigation, route}) {
-  const {resolveStress, settings} = useApp();
+  const {resolveStress} = useApp();
   const prompt = route.params?.prompt;
 
   const [phase,      setPhase]      = useState(0);
@@ -68,12 +67,8 @@ export default function BreatheScreen({navigation, route}) {
       setPhase(phaseIdx);
       setPhrase(text);
 
-      // ── Phase haptics — mirrors BreatheView.swift switch phaseIdx ──────────
-      // Hold (phaseIdx === 1) = silence, intentional — no call made
-      if (settings?.hapticsEnabled) {
-        if (phaseIdx === 0) HapticService.inhaleStart();
-        if (phaseIdx === 2) HapticService.exhaleStart();
-      }
+      // No haptics here — the breathing session is intentionally silent.
+      // The visual circle is the only pacing cue (client feedback).
 
       const targetCircle   = phaseIdx === 2 ? CIRCLE_SMALL : CIRCLE_FULL;
       const targetCircleOp = phaseIdx === 2 ? 0.28 : phaseIdx === 1 ? 0.55 : 0.65;
@@ -122,7 +117,7 @@ export default function BreatheScreen({navigation, route}) {
         }
       }, 1000);
     },
-    [prompt, circleScale, circleOpacity, glowScale, glowOpacity, settings],
+    [prompt, circleScale, circleOpacity, glowScale, glowOpacity],
   );
 
   useEffect(() => {

@@ -22,8 +22,8 @@
 //   SettingsScreen.js pulls these four values from useApp(). None were defined
 //   in state or passed in the Provider value — SettingsScreen crashed on mount.
 //   Fix: added sensitivity state (default 1 = Medium), setSensitivity(),
-//   settings state (hapticsEnabled/breathingExercises/autoDetect/quietHours),
-//   updateSetting(), and all four passed in Provider value.
+//   settings state (hapticsEnabled/autoDetect), updateSetting(), and all
+//   four passed in Provider value.
 //   calculatePhysioScore() now reads sensitivity thresholds from context so
 //   changing sensitivity in Settings actually affects trigger logic.
 //
@@ -202,11 +202,11 @@ export function AppProvider({children}) {
   // ── BUG 3 FIX: sensitivity + settings state ───────────────────────────────
   // SettingsScreen reads these from context. Previously undefined → crash.
   const [sensitivity,  setSensitivity]  = useState(1); // 0=Low, 1=Medium, 2=High
+  // Guided breathing and Quiet hours toggles were removed — they were UI
+  // with no logic behind them. Re-add here + SettingsScreen if ever built.
   const [settings,     setSettings]     = useState({
-    hapticsEnabled:     true,
-    breathingExercises: true,
-    autoDetect:         true,
-    quietHours:         false,
+    hapticsEnabled: true,
+    autoDetect:     true,
   });
 
   const updateSetting = (key, value) => {
@@ -256,6 +256,19 @@ export function AppProvider({children}) {
   useEffect(() => {
     settingsRef.current = settings;
   }, [settings]);
+
+  // Sync the full settings snapshot to the Watch on launch and whenever any
+  // piece changes. Application context delivers the latest values even if the
+  // Watch is unreachable at that moment — this closes the gap where
+  // sensitivity and Auto-detection never reached the primary detection device.
+  useEffect(() => {
+    WatchBridge.syncSettingsToWatch({
+      isSecular,
+      hapticsEnabled: settings.hapticsEnabled,
+      autoDetect:     settings.autoDetect,
+      sensitivity,
+    });
+  }, [isSecular, settings.hapticsEnabled, settings.autoDetect, sensitivity]);
 
   const SESSION_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 

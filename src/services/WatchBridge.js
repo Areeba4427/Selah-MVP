@@ -31,11 +31,13 @@ if (Platform.OS === 'ios') {
 const WatchBridge = {
 
   // ── iPhone → Watch: send simulate trigger ────────────────────────────────
-  sendSimulateToWatch: (isSecular = false) => {
+  // hapticsEnabled rides along so the Watch re-syncs the toggle even if it
+  // was unreachable when the user last changed it in Settings.
+  sendSimulateToWatch: (isSecular = false, hapticsEnabled = true) => {
     if (!WatchConnectivity) return;
     try {
       WatchConnectivity.sendMessage(
-        {event: 'simulateStress', isSecular},
+        {event: 'simulateStress', isSecular, hapticsEnabled},
         () => console.log('[Selah] Simulate sent to Watch'),
         (err) => console.log('[Selah] Watch send error:', err),
       );
@@ -51,6 +53,22 @@ const WatchBridge = {
       WatchConnectivity.sendMessage({isSecular}, null, null);
     } catch (e) {
       console.log('[Selah] WatchBridge sendMode error:', e);
+    }
+  },
+
+  // ── iPhone → Watch: sync full settings snapshot ──────────────────────────
+  // snapshot: {isSecular, hapticsEnabled, autoDetect, sensitivity}
+  // Uses application context, not a live message: WatchConnectivity queues the
+  // latest snapshot and delivers it even if the Watch is unreachable right
+  // now, and the Watch re-reads it on every launch. This is the reliable
+  // path — the sendMessage calls above are low-latency extras for a live
+  // Watch. The Watch persists each value, so settings survive restarts.
+  syncSettingsToWatch: (snapshot) => {
+    if (!WatchConnectivity) return;
+    try {
+      WatchConnectivity.updateApplicationContext(snapshot);
+    } catch (e) {
+      console.log('[Selah] WatchBridge syncSettings error:', e);
     }
   },
 

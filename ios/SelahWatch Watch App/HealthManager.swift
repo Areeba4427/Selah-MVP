@@ -83,6 +83,29 @@ class HealthManager: NSObject, ObservableObject {
     // ── Adaptive baseline ─────────────────────────────────────────────────────
     private var baseline = AdaptiveBaseline()
 
+    // ── Settings synced from the phone (via ConnectivityManager) ──────────────
+    // Persisted so they survive Watch app restarts while offline.
+
+    // Mirrors phone Settings > Auto-detection. When off, monitoring and
+    // baseline learning continue but triggering is suppressed — same split
+    // as the phone's interval in AppContext.js.
+    var autoDetectEnabled: Bool = UserDefaults.standard.object(forKey: "auto_detect") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(autoDetectEnabled, forKey: "auto_detect") }
+    }
+
+    // Mirrors phone Settings > Detection sensitivity.
+    // Indexed 0 (Low) | 1 (Medium, default) | 2 (High) — same values as
+    // SENSITIVITY_THRESHOLDS in AppContext.js.
+    var sensitivityLevel: Int = UserDefaults.standard.object(forKey: "sensitivity_level") as? Int ?? 1 {
+        didSet { UserDefaults.standard.set(sensitivityLevel, forKey: "sensitivity_level") }
+    }
+
+    private let sensitivityThresholds: [(hrvDropPct: Double, hrRiseBpm: Double)] = [
+        (hrvDropPct: 30, hrRiseBpm: 20),  // Low    — only strong signals
+        (hrvDropPct: 25, hrRiseBpm: 15),  // Medium — default
+        (hrvDropPct: 20, hrRiseBpm: 10),  // High   — more sensitive
+    ]
+
     // ── Persistence counter ───────────────────────────────────────────────────
     // FIX 5: counts consecutive checks with elevated physiology (HRV or HR
     // points scored). firstElevatedAt anchors the 30-second minimum so a burst
@@ -247,12 +270,15 @@ class HealthManager: NSObject, ObservableObject {
         var score   = 0
         var reasons = [String]()
 
+        // Thresholds follow the phone's sensitivity setting (synced snapshot)
+        let t = sensitivityThresholds[min(max(sensitivityLevel, 0), 2)]
+
         // ── HRV drop below personal baseline ─────────────────────────────────
         if let hrv = hrv {
             // FIX 2: adaptive threshold now kicks in after 1 calm sample (was 3).
             if baseline.sampleCount >= 1 {
                 let drop = ((baseline.hrv - hrv) / baseline.hrv) * 100
-                if drop >= 25 {
+                if drop >= t.hrvDropPct {
                     score += 2
                     reasons.append(String(format: "HRV %.0f%% below baseline (+2)", drop))
                 }
@@ -267,7 +293,7 @@ class HealthManager: NSObject, ObservableObject {
         if let hr = hr {
             if baseline.sampleCount >= 1 {
                 let rise = hr - baseline.hr
-                if rise >= 15 {
+                if rise >= t.hrRiseBpm {
                     score += 2
                     reasons.append(String(format: "HR %.0f bpm above baseline (+2)", rise))
                 }
@@ -339,14 +365,16 @@ class HealthManager: NSObject, ObservableObject {
             blocked:     isActive
         )
 
-        // ── 4. Trigger — score + persistence + workout gates ──────────────────
+        // ── 4. Trigger — score + persistence + workout + autoDetect gates ─────
         // FIX 5: elevated physiology must span 2+ consecutive checks AND at
         // least 30 seconds of wall-clock time ("is it lasting long enough
         // to matter?").
+        // autoDetectEnabled gates only the trigger — monitoring, debug info,
+        // and baseline learning continue while it's off (mirrors the phone).
         let persistedLongEnough = persistenceCount >= 2
             && (firstElevatedAt.map { Date().timeIntervalSince($0) >= 30 } ?? false)
 
-        if score >= 5 && persistedLongEnough && !isActive {
+        if score >= 5 && persistedLongEnough && !isActive && autoDetectEnabled {
             isStressed       = true
             persistenceCount = 0
             firstElevatedAt  = nil

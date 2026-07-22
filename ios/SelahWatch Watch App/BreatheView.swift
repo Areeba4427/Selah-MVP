@@ -6,8 +6,10 @@
 // Fixes from previous version:
 //   - @State private var completedNaturally moved inside struct (was floating outside)
 //   - .onDisappear chained correctly inside body (was pasted outside closing brace)
-//   - switch phaseIdx haptic block moved inside runPhase() (was floating outside struct)
-//   - Phase haptics: playInhaleStart() on inhale, playExhaleStart() on exhale, silence on hold
+//   - Phase haptics REMOVED entirely (client feedback: the session should be
+//     quiet — per-breath cues made it vibrate every 4-6s throughout).
+//     Haptics now only bookend the flow: detection in AlertView, closing in
+//     DoneView. Mirrors BreatheScreen.js.
 //   - Manual exit added: long-press (1.5s) reveals an End Session button —
 //     mirrors BreatheScreen.js on the phone. Previously the breathing phase
 //     was the only screen in the flow with no way out.
@@ -159,14 +161,8 @@ struct BreatheView: View {
         countdown  = p.duration
         phrase     = prompt.breathe[keyPath: p.key]
 
-        // ── Phase haptics — subtle tactile anchor ─────────────────────────────
-        // switch moved inside runPhase (was floating outside struct)
-        // Hold phase = silence, intentional
-        switch phaseIdx {
-        case 0: HapticManager.shared.playInhaleStart()
-        case 2: HapticManager.shared.playExhaleStart()
-        default: break
-        }
+        // No haptics here — the breathing session is intentionally silent.
+        // The visual circle is the only pacing cue (client feedback).
 
         // Circle animation
         let targetScale:   CGFloat = phaseIdx == 2 ? 0.40 : 1.0
