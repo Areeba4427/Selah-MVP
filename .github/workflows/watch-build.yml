@@ -1,0 +1,38 @@
+# Compile check for the watch app on a macOS runner.
+# The dev machine is Windows (no Xcode), so this workflow is the only way to
+# verify the Swift compiles before the client builds it. The watch target is
+# pure SwiftUI/HealthKit — it needs no CocoaPods / React Native setup.
+name: watch-build
+
+on:
+  push:
+    branches: [healthkit-integration, main]
+    paths:
+      - "ios/**"
+      - ".github/workflows/watch-build.yml"
+  workflow_dispatch:
+
+jobs:
+  build-watch-app:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain info
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i watch || true
+
+      - name: Build SelahWatch Watch App (no signing)
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project ios/SelahApp.xcodeproj \
+            -target "SelahWatch Watch App" \
+            -configuration Debug \
+            -sdk watchos \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM=""
