@@ -1,45 +1,49 @@
 // SelahWatch/HealthManager.swift
 //
 // Adaptive stress detector — aligned with AppContext.js scoring system.
+// The scoring rules are intentionally duplicated on the phone
+// (src/context/AppContext.js) — any scoring change must be applied to BOTH.
 //
 // Trigger logic:
-//   - Personal rolling baseline (HRV + HR)
+//   - Personal rolling baseline (HRV + HR, warmed up independently:
+//     HR adaptive after 1 calm sample, HRV after 3 distinct SDNN samples)
 //   - Scoring: HRV drop +2, HR rise +2, low movement +1, persistence +1
-//   - Trigger when score >= 5 AND elevated physiology persisted 2+ checks / 30s+
-//   - Workout/active energy filter (rolling 5-minute window)
-//   - Baseline only updated on calm readings (score < 5, not in a workout)
+//   - Trigger when score >= 4 AND fresh elevated evidence persisted across
+//     2+ distinct HR samples spanning 30s+ (a stale HRV sample re-read on
+//     later checks does not count as new evidence)
+//   - Workout/active energy filter (> 20 kcal in a strict 5-minute window)
+//   - Baseline only updated on calm readings (score < 4, not in a workout)
+//   - 10-minute cooldown between triggers (= session window)
 //
-// Fixes applied:
-//   FIX 1 — HRV predicate window widened from 5 → 15 minutes.
-//     Apple Watch writes HRV every 5–15 min at rest. A 5-min window
-//     missed samples arriving at the edge, so evaluateStress() ran
-//     far less often than expected in real wear conditions.
-//
-//   FIX 2 — Adaptive baseline kicks in after 1 calm sample (was 3).
-//     The fallback fixed thresholds (HRV < 30ms, HR > 88bpm) are too
-//     conservative for most users whose resting HRV is 40–70ms.
-//     With the old setting, the first 30–45 min of every session used
-//     fallbacks that would never fire, making early triggering impossible.
-//
-//   FIX 3 — activeEnergy is now a true rolling 5-minute sum.
-//     An anchored query's update handler only delivers samples added since
-//     the last anchor. The old code summed just that latest batch, so during
-//     a workout activeEnergy was usually a fraction of a kcal and the
-//     workout filter almost never engaged.
-//
-//   FIX 4 — Baseline is never learned from workout readings.
-//     During a workout the movement point is withheld, capping the score
-//     at 4 — which passed the old "score < 5 = calm" gate. Every workout
-//     sample dragged baseline HR up / HRV down, masking later real stress.
-//
-//   FIX 5 — Persistence is a hard trigger gate, not just a +1.
-//     HRV + HR + low movement alone sum to 5, so a single elevated reading
-//     used to trigger instantly. Elevated physiology must now be seen on
-//     2+ consecutive checks spanning at least 30 seconds.
+// Background detection (FIX 6):
+//   - HKObserverQuery + enableBackgroundDelivery(.immediate) for HR and HRV
+//     wake the app when the watch writes new samples (entitlement
+//     com.apple.developer.healthkit.background-delivery, already present).
+//   - A scheduled background refresh (SelahWatchApp) polls every ~15 min as
+//     a fallback.
+//   - Readings are fetched as one-shot queries on every wake instead of
+//     accumulating in-memory anchored-query state — a background relaunch
+//     starts with a fresh process, so nothing may live only in memory.
+//   - ALL trigger state — including the pending isStressed flag — is
+//     persisted in UserDefaults: the process is routinely killed between the
+//     notification being posted and the user tapping it.
+//   - A trigger while the app is not frontmost posts a local notification
+//     (sound + haptic). The pending flag stays valid for the 10-minute
+//     session window (hasPendingStress), then expires; any calm reading
+//     also clears it.
 
 import Foundation
 import HealthKit
 import Combine
+import UserNotifications
+import WatchKit
+
+// ── Shared timing ─────────────────────────────────────────────────────────────
+// Session lifetime (ContentView), background-trigger validity, and re-trigger
+// cooldown share one window: a detected episode "lasts" 10 minutes.
+enum SelahTiming {
+    static let sessionWindow: TimeInterval = 10 * 60
+}
 
 // ── Debug snapshot ────────────────────────────────────────────────────────────
 struct StressDebugInfo {
@@ -53,15 +57,23 @@ struct StressDebugInfo {
 }
 
 // ── Adaptive baseline ─────────────────────────────────────────────────────────
+// HR and HRV warm up independently: SDNN is written every 15 min–hours, so
+// most calm readings are HR-only. A shared counter would activate adaptive
+// HRV scoring while baseline.hrv still held the population default.
 private struct AdaptiveBaseline {
-    var hrv:         Double = 50.0   // ms  — population average resting HRV
-    var hr:          Double = 68.0   // bpm — population average resting HR
-    var sampleCount: Int    = 0
+    var hrv:      Double = 50.0   // ms  — population average resting HRV
+    var hr:       Double = 68.0   // bpm — population average resting HR
+    var hrvCount: Int    = 0
+    var hrCount:  Int    = 0
 }
 
 class HealthManager: NSObject, ObservableObject {
 
     static let shared = HealthManager()
+
+    // Must match the .backgroundTask(.appRefresh(...)) identifier in
+    // SelahWatchApp — a mismatch silently kills background polling.
+    static let backgroundRefreshID = "selah.stress.poll"
 
     // ── Published state ───────────────────────────────────────────────────────
     @Published var hrv:          Double?         = nil
@@ -75,10 +87,16 @@ class HealthManager: NSObject, ObservableObject {
         score: 0, reasons: [], blocked: false
     )
 
-    private let store        = HKHealthStore()
-    private var hrvQuery:    HKAnchoredObjectQuery?
-    private var hrQuery:     HKAnchoredObjectQuery?
-    private var energyQuery: HKAnchoredObjectQuery?
+    // A trigger is "pending" (should open a session on next app entry) only
+    // within the session window — after that an unattended episode expires
+    // instead of throwing a user who opens the app hours later into a session.
+    var hasPendingStress: Bool {
+        guard isStressed, let triggeredAt = lastTriggerAt else { return false }
+        return Date().timeIntervalSince(triggeredAt) < SelahTiming.sessionWindow
+    }
+
+    private let store = HKHealthStore()
+    private var isMonitoring = false
 
     // ── Adaptive baseline ─────────────────────────────────────────────────────
     private var baseline = AdaptiveBaseline()
@@ -107,30 +125,50 @@ class HealthManager: NSObject, ObservableObject {
     ]
 
     // ── Persistence counter ───────────────────────────────────────────────────
-    // FIX 5: counts consecutive checks with elevated physiology (HRV or HR
-    // points scored). firstElevatedAt anchors the 30-second minimum so a burst
-    // of samples delivered together can't satisfy persistence instantly.
-    private var persistenceCount: Int = 0
-    private var firstElevatedAt: Date? = nil
+    // Counts distinct HR samples with FRESH elevated evidence. Persisted so a
+    // background relaunch between two samples doesn't lose the streak.
+    // A >30-min gap between counted samples starts a new episode.
+    private var persistenceCount: Int   = 0
+    private var firstElevatedAt:  Date? = nil
+    private var lastCountedHRAt:  Date? = nil
+    private var lastCountedHRVAt: Date? = nil
+    private var lastTriggerAt:    Date? = nil
+
+    private let episodeGapLimit: TimeInterval = 30 * 60
+
+    // Debounce for observer-driven evaluations: during workouts the watch
+    // writes HR every few seconds and each write would otherwise cost three
+    // HealthKit queries. Persistence needs 30s spans anyway. Main-queue only.
+    private var lastObserverFetchAt: Date? = nil
+
+    // ── Sample recency windows ────────────────────────────────────────────────
+    private let hrWindowMinutes:  Double = 15
+    private let hrvWindowMinutes: Double = 60   // SDNN is written rarely
 
     // ── Active / workout filter ───────────────────────────────────────────────
-    // > 5 kcal in the last 5 min = user is active.
-    // FIX 3: individual samples are kept with their timestamps so the total is
-    // a true rolling window — a single update batch says nothing about it.
-    private let activeEnergyThreshold: Double = 5.0
-    private var energySamples: [(date: Date, kcal: Double)] = []
+    // > 20 kcal in the last 5 min = genuinely active. 5 kcal was exceeded by
+    // ordinary walking (~4–5 kcal/min).
+    private let activeEnergyThreshold: Double = 20.0
     var isActive: Bool { activeEnergy > activeEnergyThreshold }
 
     // ── Callback fired when trigger conditions are met ────────────────────────
     var onStressDetected: (() -> Void)?
 
     // ─────────────────────────────────────────────────────────────────────────
-    // MARK: - Authorization
+    // MARK: - Authorization & Monitoring Setup
     // ─────────────────────────────────────────────────────────────────────────
 
+    // Idempotent — called from SelahWatchApp.init() (covers background
+    // launches) and ContentView.onAppear. The latch is released on an
+    // authorization failure so a later foreground call can retry.
     func startMonitoring() {
-        loadBaseline()
+        guard !isMonitoring else { return }
         guard HKHealthStore.isHealthDataAvailable() else { return }
+        isMonitoring = true
+
+        loadBaseline()
+        loadTriggerState()
+        requestNotificationAuthIfNeeded()
 
         let typesToRead: Set<HKObjectType> = [
             HKObjectType.quantityType(forIdentifier: .heartRateVariabilitySDNN)!,
@@ -144,197 +182,297 @@ class HealthManager: NSObject, ObservableObject {
         store.requestAuthorization(toShare: typesToWrite, read: typesToRead) { success, _ in
             DispatchQueue.main.async {
                 self.isAuthorized = success
-                if success {
-                    self.startHRVQuery()
-                    self.startHRQuery()
-                    self.startEnergyQuery()
+                guard success else {
+                    self.isMonitoring = false
+                    return
                 }
+                self.startObserving(.heartRate)
+                self.startObserving(.heartRateVariabilitySDNN)
+                // Populate state immediately on launch.
+                self.fetchAndEvaluate()
             }
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // MARK: - HealthKit Queries
-    // ─────────────────────────────────────────────────────────────────────────
+    // Needed for background stress alerts. Only ask while undetermined — a
+    // background launch can't present the prompt, so the request is retried
+    // on every launch until the user answers one in the foreground.
+    private func requestNotificationAuthIfNeeded() {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            guard settings.authorizationStatus == .notDetermined else { return }
+            center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        }
+    }
 
-    private func startHRVQuery() {
-        guard let type = HKObjectType.quantityType(forIdentifier: .heartRateVariabilitySDNN) else { return }
-        let query = HKAnchoredObjectQuery(
-            type: type,
-            // FIX 1: widened from 5 → 15 minutes.
-            predicate: recentPredicate(minutes: 15),
-            anchor: nil,
-            limit: HKObjectQueryNoLimit
-        ) { [weak self] _, samples, _, _, _ in self?.processHRV(samples: samples) }
-        query.updateHandler = { [weak self] _, samples, _, _, _ in self?.processHRV(samples: samples) }
+    private func startObserving(_ identifier: HKQuantityTypeIdentifier) {
+        guard let type = HKObjectType.quantityType(forIdentifier: identifier) else { return }
+
+        let query = HKObserverQuery(sampleType: type, predicate: nil) {
+            [weak self] _, completionHandler, error in
+            guard error == nil, let self = self else {
+                completionHandler()
+                return
+            }
+            // Completion handler MUST be called after processing, or the
+            // system throttles future background deliveries.
+            DispatchQueue.main.async {
+                if let last = self.lastObserverFetchAt,
+                   Date().timeIntervalSince(last) < 30 {
+                    completionHandler()
+                    return
+                }
+                self.lastObserverFetchAt = Date()
+                self.fetchAndEvaluate { completionHandler() }
+            }
+        }
         store.execute(query)
-        hrvQuery = query
-    }
 
-    private func startHRQuery() {
-        guard let type = HKObjectType.quantityType(forIdentifier: .heartRate) else { return }
-        let query = HKAnchoredObjectQuery(
-            type: type, predicate: recentPredicate(minutes: 2),
-            anchor: nil, limit: HKObjectQueryNoLimit
-        ) { [weak self] _, samples, _, _, _ in self?.processHR(samples: samples) }
-        query.updateHandler = { [weak self] _, samples, _, _, _ in self?.processHR(samples: samples) }
-        store.execute(query)
-        hrQuery = query
-    }
-
-    private func startEnergyQuery() {
-        guard let type = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned) else { return }
-        let query = HKAnchoredObjectQuery(
-            type: type, predicate: recentPredicate(minutes: 5),
-            anchor: nil, limit: HKObjectQueryNoLimit
-        ) { [weak self] _, samples, _, _, _ in self?.processEnergy(samples: samples) }
-        query.updateHandler = { [weak self] _, samples, _, _, _ in self?.processEnergy(samples: samples) }
-        store.execute(query)
-        energyQuery = query
+        store.enableBackgroundDelivery(for: type, frequency: .immediate) { _, _ in }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // MARK: - Sample Processing
+    // MARK: - One-shot Fetch + Evaluate
+    // Every wake — observer delivery, background refresh, or foreground —
+    // re-reads the latest samples fresh from the store. Nothing depends on
+    // long-lived in-memory query state, so a cold background relaunch
+    // evaluates exactly like a warm one.
     // ─────────────────────────────────────────────────────────────────────────
 
-    private func processHRV(samples: [HKSample]?) {
-        guard let samples = samples as? [HKQuantitySample], !samples.isEmpty else { return }
-        let value = samples.sorted { $0.endDate > $1.endDate }.first!
-            .quantity.doubleValue(for: HKUnit.secondUnit(with: .milli))
-        DispatchQueue.main.async {
-            self.hrv = value
-            self.evaluateStress()
+    func fetchAndEvaluate(completion: @escaping () -> Void = {}) {
+        let group = DispatchGroup()
+
+        var latestHR:  (value: Double, date: Date)? = nil
+        var latestHRV: (value: Double, date: Date)? = nil
+        var energySum: Double = 0
+
+        group.enter()
+        fetchLatestQuantity(
+            .heartRate, withinMinutes: hrWindowMinutes,
+            unit: HKUnit.count().unitDivided(by: .minute())
+        ) { sample in
+            latestHR = sample
+            group.leave()
+        }
+
+        group.enter()
+        fetchLatestQuantity(
+            .heartRateVariabilitySDNN, withinMinutes: hrvWindowMinutes,
+            unit: HKUnit.secondUnit(with: .milli)
+        ) { sample in
+            latestHRV = sample
+            group.leave()
+        }
+
+        group.enter()
+        fetchActiveEnergySum { total in
+            energySum = total
+            group.leave()
+        }
+
+        group.notify(queue: .main) { [weak self] in
+            guard let self = self else { completion(); return }
+            self.hr           = latestHR?.value
+            self.hrv          = latestHRV?.value
+            self.activeEnergy = energySum
+            self.evaluateStress(hrSampleDate: latestHR?.date, hrvSampleDate: latestHRV?.date)
+            completion()
         }
     }
 
-    private func processHR(samples: [HKSample]?) {
-        guard let samples = samples as? [HKQuantitySample], !samples.isEmpty else { return }
-        let unit  = HKUnit.count().unitDivided(by: .minute())
-        let value = samples.sorted { $0.endDate > $1.endDate }.first!
-            .quantity.doubleValue(for: unit)
-        DispatchQueue.main.async {
-            self.hr = value
-            self.evaluateStress()
+    // Async wrapper for SelahWatchApp's scheduled background refresh task.
+    func backgroundPoll() async {
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            fetchAndEvaluate { cont.resume() }
         }
     }
 
-    private func processEnergy(samples: [HKSample]?) {
-        guard let samples = samples as? [HKQuantitySample] else { return }
-        // FIX 3: append the new batch, then recompute the rolling 5-min sum.
-        // Replacing activeEnergy with just this batch's total made the workout
-        // filter blind to everything delivered in earlier batches.
-        let entries: [(date: Date, kcal: Double)] = samples.map {
-            (date: $0.endDate, kcal: $0.quantity.doubleValue(for: .kilocalorie()))
-        }
-        DispatchQueue.main.async {
-            self.energySamples.append(contentsOf: entries)
-            self.refreshActiveEnergy()
-        }
+    func scheduleBackgroundRefresh() {
+        WKApplication.shared().scheduleBackgroundRefresh(
+            withPreferredDate: Date().addingTimeInterval(15 * 60),
+            userInfo: HealthManager.backgroundRefreshID as NSString
+        ) { _ in }
     }
 
-    // Drop samples older than 5 minutes and re-sum. Also called from
-    // evaluateStress() so a finished workout decays out of the window even
-    // when no new energy samples arrive.
-    private func refreshActiveEnergy() {
-        let cutoff = Date().addingTimeInterval(-5 * 60)
-        energySamples.removeAll { $0.date < cutoff }
-        activeEnergy = energySamples.reduce(0.0) { $0 + $1.kcal }
+    // .strictStartDate: a sample must START inside the window. Without it, a
+    // long sample merely OVERLAPPING the window matches — e.g. a 40-minute
+    // 250 kcal workout sample would count at full value for 5 minutes after
+    // the workout ends, blocking triggers exactly when post-exercise stress
+    // detection should resume.
+    private func recentPredicate(minutes: Double) -> NSPredicate {
+        HKQuery.predicateForSamples(
+            withStart: Date().addingTimeInterval(-minutes * 60),
+            end: nil, options: .strictStartDate
+        )
+    }
+
+    private func fetchLatestQuantity(
+        _ identifier: HKQuantityTypeIdentifier,
+        withinMinutes: Double,
+        unit: HKUnit,
+        done: @escaping ((value: Double, date: Date)?) -> Void
+    ) {
+        guard let type = HKObjectType.quantityType(forIdentifier: identifier) else {
+            done(nil)
+            return
+        }
+        let sort  = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+        let query = HKSampleQuery(
+            sampleType: type, predicate: recentPredicate(minutes: withinMinutes),
+            limit: 1, sortDescriptors: [sort]
+        ) { _, samples, _ in
+            guard let sample = (samples as? [HKQuantitySample])?.first else {
+                done(nil)
+                return
+            }
+            done((value: sample.quantity.doubleValue(for: unit), date: sample.endDate))
+        }
+        store.execute(query)
+    }
+
+    // A statistics sum over the last 5 minutes is a true rolling window and
+    // needs no in-memory sample bookkeeping (which a relaunch would lose).
+    private func fetchActiveEnergySum(done: @escaping (Double) -> Void) {
+        guard let type = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned) else {
+            done(0)
+            return
+        }
+        let query = HKStatisticsQuery(
+            quantityType: type, quantitySamplePredicate: recentPredicate(minutes: 5),
+            options: .cumulativeSum
+        ) { _, stats, _ in
+            done(stats?.sumQuantity()?.doubleValue(for: .kilocalorie()) ?? 0)
+        }
+        store.execute(query)
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // MARK: - Adaptive Baseline
     // ─────────────────────────────────────────────────────────────────────────
 
-    private func updateBaseline(hrv: Double, hr: Double) {
-        let n = baseline.sampleCount + 1
-        if n < 5 {
-            baseline.hrv = (baseline.hrv * Double(baseline.sampleCount) + hrv) / Double(n)
-            baseline.hr  = (baseline.hr  * Double(baseline.sampleCount) + hr)  / Double(n)
-        } else {
-            baseline.hrv = baseline.hrv * 0.85 + hrv * 0.15
-            baseline.hr  = baseline.hr  * 0.85 + hr  * 0.15
+    // hrv is optional — an HR-only calm reading teaches the HR baseline while
+    // leaving the HRV baseline (and its warm-up count) untouched.
+    private func updateBaseline(hrv: Double?, hr: Double) {
+        let nHR = baseline.hrCount + 1
+        baseline.hr = nHR < 5
+            ? (baseline.hr * Double(baseline.hrCount) + hr) / Double(nHR)
+            : baseline.hr * 0.85 + hr * 0.15
+        baseline.hrCount = min(nHR, 100)
+
+        if let hrv = hrv {
+            let nHRV = baseline.hrvCount + 1
+            baseline.hrv = nHRV < 5
+                ? (baseline.hrv * Double(baseline.hrvCount) + hrv) / Double(nHRV)
+                : baseline.hrv * 0.85 + hrv * 0.15
+            baseline.hrvCount = min(nHRV, 100)
         }
-        baseline.sampleCount = min(n, 100)
 
         saveBaseline()
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // MARK: - Stress Scoring
-    // Score >= 5 AND persisted elevated physiology triggers intervention.
+    // Score >= 4 AND persisted fresh elevated evidence triggers intervention.
     // ─────────────────────────────────────────────────────────────────────────
 
-    // HRV + HR points only — this is what the persistence counter tracks.
-    // Movement and persistence points are added in evaluateStress().
-    private func calculatePhysioScore() -> (score: Int, reasons: [String]) {
-        var score   = 0
-        var reasons = [String]()
+    // HRV + HR points only — movement and persistence points are added in
+    // evaluateStress(). Points are returned per-signal because persistence
+    // only counts FRESH evidence (see evaluateStress).
+    private func calculatePhysioScore() -> (hrPoints: Int, hrvPoints: Int, reasons: [String]) {
+        var hrPoints  = 0
+        var hrvPoints = 0
+        var reasons   = [String]()
 
         // Thresholds follow the phone's sensitivity setting (synced snapshot)
         let t = sensitivityThresholds[min(max(sensitivityLevel, 0), 2)]
 
         // ── HRV drop below personal baseline ─────────────────────────────────
+        // Adaptive only after 3 distinct SDNN samples: a single sample is too
+        // noisy to serve as a baseline (SDNN swings widely at rest), and it
+        // must never be scored against the un-personalized 50ms default.
         if let hrv = hrv {
-            // FIX 2: adaptive threshold now kicks in after 1 calm sample (was 3).
-            if baseline.sampleCount >= 1 {
+            if baseline.hrvCount >= 3 {
                 let drop = ((baseline.hrv - hrv) / baseline.hrv) * 100
                 if drop >= t.hrvDropPct {
-                    score += 2
+                    hrvPoints = 2
                     reasons.append(String(format: "HRV %.0f%% below baseline (+2)", drop))
                 }
             } else if hrv < 30 {
-                // Fallback — only before any calm reading is recorded
-                score += 2
+                // Fallback fixed floor while the HRV baseline warms up
+                hrvPoints = 2
                 reasons.append(String(format: "HRV %.0fms below 30ms floor (+2)", hrv))
             }
         }
 
         // ── HR rise above personal baseline ──────────────────────────────────
+        // HR baselines are far less noisy — adaptive after 1 calm sample so
+        // the conservative 88bpm floor rules out early triggering as briefly
+        // as possible.
         if let hr = hr {
-            if baseline.sampleCount >= 1 {
+            if baseline.hrCount >= 1 {
                 let rise = hr - baseline.hr
                 if rise >= t.hrRiseBpm {
-                    score += 2
+                    hrPoints = 2
                     reasons.append(String(format: "HR %.0f bpm above baseline (+2)", rise))
                 }
             } else if hr > 88 {
-                score += 2
+                hrPoints = 2
                 reasons.append(String(format: "HR %.0fbpm above 88 floor (+2)", hr))
             }
         }
 
-        return (score, reasons)
+        return (hrPoints, hrvPoints, reasons)
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // MARK: - Stress Evaluation
     // ─────────────────────────────────────────────────────────────────────────
 
-    private func evaluateStress() {
-        guard let currentHRV = hrv, let currentHR = hr else { return }
+    private func evaluateStress(hrSampleDate: Date?, hrvSampleDate: Date?) {
+        // HRV is optional — HR alone is enough to evaluate. SDNN may not be
+        // written for hours in normal wear; that must not block detection.
+        guard let currentHR = hr, let hrDate = hrSampleDate else { return }
 
-        // FIX 3: decay the energy window even if no new samples arrived,
-        // so a finished workout stops blocking triggers after 5 minutes.
-        refreshActiveEnergy()
+        let physio      = calculatePhysioScore()
+        let physioScore = physio.hrPoints + physio.hrvPoints
 
-        // ── 1. Physiological signals drive the persistence counter ───────────
-        // FIX 5: persistence tracks elevated physiology (any HRV/HR points),
-        // updated BEFORE the full score so its +1 applies from the 2nd check.
-        // The old counter tracked score >= 5 — which the score reached on a
-        // single reading, so persistence never actually gated anything.
-        let (physioScore, physioReasons) = calculatePhysioScore()
-
-        if physioScore >= 2 {
-            if persistenceCount == 0 { firstElevatedAt = Date() }
-            persistenceCount += 1
-        } else {
+        // ── 1. Persistence — counts distinct HR samples with FRESH evidence ──
+        // A stale HRV sample stays "current" for up to 60 min and would
+        // otherwise score +2 on every later check: one transient SDNN dip
+        // could satisfy the whole persistence gate with completely normal HR.
+        // So HRV elevation only counts as new evidence once per SDNN sample;
+        // an echo neither increments nor resets the streak.
+        if let last = lastCountedHRAt, hrDate.timeIntervalSince(last) > episodeGapLimit {
             persistenceCount = 0
             firstElevatedAt  = nil
         }
 
+        let isNewHRSample = lastCountedHRAt.map { hrDate > $0 } ?? true
+        let hrvIsFresh    = hrvSampleDate.map { d in
+            lastCountedHRVAt.map { d > $0 } ?? true
+        } ?? false
+
+        if isNewHRSample {
+            let freshEvidence = physio.hrPoints > 0 || (physio.hrvPoints > 0 && hrvIsFresh)
+            if freshEvidence {
+                if persistenceCount == 0 { firstElevatedAt = hrDate }
+                persistenceCount += 1
+                if physio.hrvPoints > 0 && hrvIsFresh {
+                    lastCountedHRVAt = hrvSampleDate
+                }
+            } else if physioScore == 0 {
+                persistenceCount = 0
+                firstElevatedAt  = nil
+            }
+            // physioScore > 0 from an HRV echo alone: hold the streak —
+            // neither fresh evidence of stress nor evidence of calm.
+            lastCountedHRAt = hrDate
+            saveTriggerState()
+        }
+
         // ── 2. Full score ─────────────────────────────────────────────────────
         var score   = physioScore
-        var reasons = physioReasons
+        var reasons = physio.reasons
 
         if !isActive {
             score += 1
@@ -349,15 +487,15 @@ class HealthManager: NSObject, ObservableObject {
         }
 
         // ── 3. Baseline — calm readings only, never during a workout ─────────
-        // FIX 4: workout readings capped at score 4 used to pass the old
-        // "score < 5" gate and drag the baseline toward workout HR/HRV.
-        if score < 5 && !isActive {
-            updateBaseline(hrv: currentHRV, hr: currentHR)
+        // Gate matches the trigger gate (score < 4) so a triggering reading
+        // can never feed the baseline.
+        if score < 4 && !isActive {
+            updateBaseline(hrv: hrv, hr: currentHR)
         }
 
         debugInfo = StressDebugInfo(
             currentHR:   currentHR,
-            currentHRV:  currentHRV,
+            currentHRV:  hrv,
             baselineHR:  baseline.hr.rounded(),
             baselineHRV: baseline.hrv.rounded(),
             score:       score,
@@ -366,23 +504,59 @@ class HealthManager: NSObject, ObservableObject {
         )
 
         // ── 4. Trigger — score + persistence + workout + autoDetect gates ─────
-        // FIX 5: elevated physiology must span 2+ consecutive checks AND at
-        // least 30 seconds of wall-clock time ("is it lasting long enough
-        // to matter?").
+        // Gate is 4: one strong physio signal (+2) with low movement (+1) and
+        // persistence (+1) suffices. (The old gate of 5 demanded HRV drop AND
+        // HR rise simultaneously — effectively unreachable given real SDNN
+        // write cadence.) Fresh elevated evidence must span 2+ distinct HR
+        // samples AND at least 30 seconds. 10-min cooldown so background
+        // wakes can't re-trigger the same episode.
         // autoDetectEnabled gates only the trigger — monitoring, debug info,
         // and baseline learning continue while it's off (mirrors the phone).
         let persistedLongEnough = persistenceCount >= 2
-            && (firstElevatedAt.map { Date().timeIntervalSince($0) >= 30 } ?? false)
+            && (firstElevatedAt.map { hrDate.timeIntervalSince($0) >= 30 } ?? false)
+        let cooldownElapsed = lastTriggerAt
+            .map { Date().timeIntervalSince($0) >= SelahTiming.sessionWindow } ?? true
 
-        if score >= 5 && persistedLongEnough && !isActive && autoDetectEnabled {
+        if score >= 4 && persistedLongEnough && !isActive
+            && autoDetectEnabled && cooldownElapsed {
             isStressed       = true
             persistenceCount = 0
             firstElevatedAt  = nil
+            lastTriggerAt    = Date()
+            saveTriggerState()
             onStressDetected?()
             ConnectivityManager.shared.sendStressDetectedToPhone()
-        } else if score < 5 {
+
+            // With the app off-screen there is no UI to show — alert the
+            // wrist with a local notification. Tapping it opens the app,
+            // where hasPendingStress routes into a session.
+            if WKApplication.shared().applicationState != .active {
+                postStressNotification()
+            }
+        } else if score < 4 && isStressed {
+            // Any calm reading clears a pending trigger — physiology says the
+            // episode is over, so an app open should land on the idle screen.
             isStressed = false
+            saveTriggerState()
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MARK: - Stress Notification
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private func postStressNotification() {
+        let content   = UNMutableNotificationContent()
+        content.title = "Selah"
+        content.body  = "Your body is showing signs of stress. Take a moment to breathe."
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: "selah.stress.alert",
+            content:    content,
+            trigger:    nil
+        )
+        UNUserNotificationCenter.current().add(request)
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -403,27 +577,63 @@ class HealthManager: NSObject, ObservableObject {
         isStressed       = false
         persistenceCount = 0
         firstElevatedAt  = nil
+        saveTriggerState()
     }
 
-    private func recentPredicate(minutes: Int) -> NSPredicate {
-        let start = Date().addingTimeInterval(-Double(minutes) * 60)
-        return HKQuery.predicateForSamples(withStart: start, end: nil, options: .strictStartDate)
-    }
-
-        // Save after every baseline update
+    // Save after every baseline update
     private func saveBaseline() {
-        UserDefaults.standard.set(baseline.hrv,         forKey: "baseline_hrv")
-        UserDefaults.standard.set(baseline.hr,          forKey: "baseline_hr")
-        UserDefaults.standard.set(baseline.sampleCount, forKey: "baseline_count")
+        let d = UserDefaults.standard
+        d.set(baseline.hrv,      forKey: "baseline_hrv")
+        d.set(baseline.hr,       forKey: "baseline_hr")
+        d.set(baseline.hrCount,  forKey: "baseline_hr_count")
+        d.set(baseline.hrvCount, forKey: "baseline_hrv_count")
     }
 
-    // Load on init
+    // Load on init. "baseline_count" is the legacy shared counter from before
+    // the counts were split — seed both from it once, then the split keys win.
     private func loadBaseline() {
-        let count = UserDefaults.standard.integer(forKey: "baseline_count")
-        guard count > 0 else { return }  // no saved data, keep defaults
-        baseline.hrv         = UserDefaults.standard.double(forKey: "baseline_hrv")
-        baseline.hr          = UserDefaults.standard.double(forKey: "baseline_hr")
-        baseline.sampleCount = count
+        let d      = UserDefaults.standard
+        let legacy = d.integer(forKey: "baseline_count")
+        baseline.hrCount  = max(d.integer(forKey: "baseline_hr_count"),  legacy)
+        baseline.hrvCount = max(d.integer(forKey: "baseline_hrv_count"), legacy)
+        if baseline.hrCount  > 0 { baseline.hr  = d.double(forKey: "baseline_hr") }
+        if baseline.hrvCount > 0 { baseline.hrv = d.double(forKey: "baseline_hrv") }
+    }
+
+    // Trigger state — including the pending isStressed flag — survives
+    // background relaunches: the process is routinely killed between posting
+    // the stress notification and the user tapping it.
+    private func saveTriggerState() {
+        let d = UserDefaults.standard
+        d.set(persistenceCount, forKey: "persistence_count")
+        d.set(isStressed,       forKey: "stress_pending")
+        setDate(firstElevatedAt,  forKey: "first_elevated_at")
+        setDate(lastCountedHRAt,  forKey: "last_counted_hr_at")
+        setDate(lastCountedHRVAt, forKey: "last_counted_hrv_at")
+        setDate(lastTriggerAt,    forKey: "last_trigger_at")
+    }
+
+    private func loadTriggerState() {
+        let d = UserDefaults.standard
+        persistenceCount = d.integer(forKey: "persistence_count")
+        firstElevatedAt  = d.object(forKey: "first_elevated_at")   as? Date
+        lastCountedHRAt  = d.object(forKey: "last_counted_hr_at")  as? Date
+        lastCountedHRVAt = d.object(forKey: "last_counted_hrv_at") as? Date
+        lastTriggerAt    = d.object(forKey: "last_trigger_at")     as? Date
+
+        // Restore a pending trigger only while it is still actionable.
+        isStressed = d.bool(forKey: "stress_pending")
+            && (lastTriggerAt.map {
+                    Date().timeIntervalSince($0) < SelahTiming.sessionWindow
+                } ?? false)
+    }
+
+    private func setDate(_ date: Date?, forKey key: String) {
+        if let date = date {
+            UserDefaults.standard.set(date, forKey: key)
+        } else {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
     }
 
 }

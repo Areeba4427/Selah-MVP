@@ -52,9 +52,11 @@ const PERMISSIONS = AppleHealthKit ? {
   },
 } : null;
 
-// Active energy threshold — mirrors AppContext / HealthManager.swift
-// > 5 kcal in 5 min = user is in a workout, skip trigger
-const ACTIVE_CALORIES_THRESHOLD = 5;
+// Active energy threshold — mirrors HealthManager.swift (keep in sync)
+// > 20 kcal in 5 min = user is genuinely active, skip trigger.
+// The old 5 kcal threshold was exceeded by ordinary walking (~4–5 kcal/min),
+// which hard-blocked triggers whenever the user was merely moving around.
+const ACTIVE_CALORIES_THRESHOLD = 20;
 
 const HealthKitService = {
 
@@ -67,9 +69,13 @@ const HealthKitService = {
     });
   }),
 
+  // Samples resolve as {value, date} (date = sample endDate in epoch ms) or
+  // null. The date lets AppContext count persistence on DISTINCT samples only
+  // — the same stale sample re-fetched on consecutive 30s polls must not
+  // accumulate "persistence". Mirrors HealthManager.swift.
   getHRV: () => new Promise((resolve) => {
     if (!AppleHealthKit || !isInitialized) {
-      resolve(Math.random() * 45 + 20); // simulate 20–65ms
+      resolve({value: Math.random() * 45 + 20, date: Date.now()}); // simulate 20–65ms
       return;
     }
     AppleHealthKit.getHeartRateVariabilitySamples(
@@ -79,13 +85,16 @@ const HealthKitService = {
         ascending: false,
         limit:     1,
       },
-      (err, results) => resolve(!err && results?.length ? results[0].value : null)
+      (err, results) => {
+        if (err || !results?.length) { resolve(null); return; }
+        resolve({value: results[0].value, date: new Date(results[0].endDate).getTime()});
+      }
     );
   }),
 
   getHeartRate: () => new Promise((resolve) => {
     if (!AppleHealthKit || !isInitialized) {
-      resolve(Math.random() * 30 + 65); // simulate 65–95 bpm
+      resolve({value: Math.random() * 30 + 65, date: Date.now()}); // simulate 65–95 bpm
       return;
     }
     AppleHealthKit.getHeartRateSamples(
@@ -95,7 +104,10 @@ const HealthKitService = {
         ascending: false,
         limit:     1,
       },
-      (err, results) => resolve(!err && results?.length ? results[0].value : null)
+      (err, results) => {
+        if (err || !results?.length) { resolve(null); return; }
+        resolve({value: results[0].value, date: new Date(results[0].endDate).getTime()});
+      }
     );
   }),
 
@@ -138,22 +150,31 @@ const HealthKitService = {
   }),
 
   // ── checkStress ─────────────────────────────────────────────────────────────
-  // Returns raw biometric readings only — { hrv, hr, isActive }.
-  // isActive is now: true | false | null
+  // Returns raw biometric readings only —
+  //   { hrv, hrvDate, hr, hrDate, isActive }
+  // hrv/hr are values (or null); hrvDate/hrDate are the sample endDates in
+  // epoch ms (or null) so AppContext can gate persistence on distinct samples.
+  // isActive: true | false | null
   //   null means HealthKit is not ready yet — AppContext skips the movement point.
   // AppContext.js owns all stress scoring (adaptive baseline, scoring,
   // persistence). Do NOT add isStressed or stressIndex here.
   checkStress: async () => {
     try {
-      const [hrv, hr, isActive] = await Promise.all([
+      const [hrvSample, hrSample, isActive] = await Promise.all([
         HealthKitService.getHRV(),
         HealthKitService.getHeartRate(),
         HealthKitService.isUserActive(),
       ]);
-      return {hrv, hr, isActive};
+      return {
+        hrv:     hrvSample?.value ?? null,
+        hrvDate: hrvSample?.date  ?? null,
+        hr:      hrSample?.value  ?? null,
+        hrDate:  hrSample?.date   ?? null,
+        isActive,
+      };
     } catch (e) {
       console.log('[Selah] checkStress error:', e);
-      return {hrv: null, hr: null, isActive: null};
+      return {hrv: null, hrvDate: null, hr: null, hrDate: null, isActive: null};
     }
   },
 };

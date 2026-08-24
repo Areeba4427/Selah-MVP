@@ -41,15 +41,18 @@ struct ContentView: View {
     @State private var hasActiveSession: Bool         = false
     @State private var sessionBackgroundAt: Date?     = nil
 
-    // ── Session timeout — mirrors AppContext SESSION_TIMEOUT_MS (10 min) ──────
+    // ── Session timeout — SelahTiming.sessionWindow (10 min), shared with
+    // HealthManager's trigger cooldown and pending-stress validity, and
+    // mirroring AppContext SESSION_TIMEOUT_MS.
     @State private var sessionTimer: DispatchWorkItem? = nil
-    private let SESSION_TIMEOUT: TimeInterval = 10 * 60
 
     // ── Live stress index for IdleView bar ────────────────────────────────────
+    // HRV is optional (FIX 7 in HealthManager) — with no recent SDNN sample
+    // the bar runs on the HR component alone instead of a placeholder.
     private var liveStressIndex: Double {
         let d = health.debugInfo
-        guard let currentHRV = d.currentHRV else { return 24 }
-        let hrvComponent = max(0, (1 - currentHRV / max(d.baselineHRV, 1)) * 50)
+        guard d.currentHR != nil || d.currentHRV != nil else { return 24 }
+        let hrvComponent = d.currentHRV.map { max(0, (1 - $0 / max(d.baselineHRV, 1)) * 50) } ?? 0
         let hrComponent  = max(0, min(50, ((d.currentHR ?? d.baselineHR) - d.baselineHR) / 30 * 50))
         return min(100, hrvComponent + hrComponent)
     }
@@ -90,10 +93,10 @@ struct ContentView: View {
                 }
             }
         }
-        // ── Watch HealthManager detected stress ───────────────────────────────
+        // ── Watch HealthManager detected stress (app in foreground) ───────────
         .onChange(of: health.isStressed) { stressed in
-            guard stressed, phase == .idle else { return }
-            triggerSession()
+            guard stressed else { return }
+            startPendingStressSession()
         }
         // ── iPhone sent a simulate trigger ────────────────────────────────────
         // No playDetection() here — AlertView fires it at Phase 1 internally.
@@ -113,20 +116,46 @@ struct ContentView: View {
                     startSessionTimeout()
                 }
             case .active:
+                // Stress detected while the app was suspended — e.g. user
+                // opened it from the notification. onChange(of: isStressed)
+                // never fires for a value that was already true before the
+                // UI attached, so check here. Captured BEFORE the stale-
+                // session cleanup: resetSession() → resetStress() clears
+                // isStressed, which must not swallow a new pending trigger.
+                let stressPending = health.hasPendingStress
                 if let backgroundAt = sessionBackgroundAt,
-                   Date().timeIntervalSince(backgroundAt) >= SESSION_TIMEOUT {
+                   Date().timeIntervalSince(backgroundAt) >= SelahTiming.sessionWindow {
                     resetSession()
                 } else {
                     cancelSessionTimeout()
                 }
                 sessionBackgroundAt = nil
+                if stressPending {
+                    startPendingStressSession()
+                }
             @unknown default:
                 break
             }
         }
         .onAppear {
+            // startMonitoring is idempotent; this call also serves as the
+            // retry path after an authorization failure at background launch.
             health.startMonitoring()
+            // Same launch-with-stress-pending case as scenePhase above, for
+            // a cold start from the stress notification.
+            if health.hasPendingStress {
+                startPendingStressSession()
+            }
         }
+    }
+
+    // ── Pending stress → session ──────────────────────────────────────────────
+    // Single entry point for every "stress was detected" path: live foreground
+    // detection (onChange), notification-tap cold start (onAppear), and
+    // re-activation with a pending trigger (scenePhase .active).
+    private func startPendingStressSession() {
+        guard phase == .idle else { return }
+        triggerSession()
     }
 
     // ── Trigger session ───────────────────────────────────────────────────────
@@ -160,7 +189,7 @@ struct ContentView: View {
             DispatchQueue.main.async { resetSession() }
         }
         sessionTimer = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + SESSION_TIMEOUT, execute: item)
+        DispatchQueue.main.asyncAfter(deadline: .now() + SelahTiming.sessionWindow, execute: item)
     }
 
     private func cancelSessionTimeout() {

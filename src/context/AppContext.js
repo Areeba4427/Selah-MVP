@@ -104,11 +104,22 @@ export const secularPrompts = [
 ];
 
 // ── Adaptive Baseline ─────────────────────────────────────────────────────────
+// HR and HRV warm up independently (mirrors HealthManager.swift): SDNN is
+// written every 15 min–hours, so most calm readings are HR-only. A shared
+// counter would activate adaptive HRV scoring while hrv still held the
+// population default.
 const DEFAULT_BASELINE = {
   hrv: 50,   // ms — population average resting HRV
   hr:  68,   // bpm — population average resting HR
-  sampleCount: 0,
+  hrvCount: 0,
+  hrCount:  0,
 };
+
+// Persistence needs FRESH evidence spanning real time (mirrors the watch):
+// distinct HR samples only, 30s minimum span, and a >30-min gap between
+// counted samples starts a new episode.
+const PERSISTENCE_MIN_SPAN_MS = 30 * 1000;
+const EPISODE_GAP_LIMIT_MS    = 30 * 60 * 1000;
 
 // ── Sensitivity thresholds ────────────────────────────────────────────────────
 // Indexed 0 (Low) | 1 (Medium, default) | 2 (High).
@@ -121,47 +132,72 @@ const SENSITIVITY_THRESHOLDS = {
 };
 
 // ── Stress Scoring ────────────────────────────────────────────────────────────
-// Score >= 5 AND 2+ persistent elevated checks triggers intervention.
+// Score >= 4 AND 2+ persistent elevated checks triggers intervention.
 // Split in two (BUG 7): the physiological part (HRV + HR) is what the
 // persistence counter tracks; movement and persistence points are layered on
 // top in assembleStressScore().
+//
+// RELAXATION (mirrors HealthManager.swift FIX 7 — keep in sync):
+//   The old gate (score >= 5) required BOTH the HRV drop (+2) AND the HR rise
+//   (+2) at the same time — Apple Watch writes SDNN only every 15 min–several
+//   hours in normal wear, so the "current" HRV almost always reflected an
+//   older calm moment and the gate was effectively unreachable.
+//   - Trigger gate lowered to 4: one physio signal + low movement +
+//     persistence now suffices.
+//   - Baseline "calm" gate moved to score < 4 to match (a triggering reading
+//     must never feed the baseline).
+//   - Baselines warm up independently: HR adaptive after 1 calm sample (the
+//     88bpm fallback floor is too conservative to leave active for long),
+//     HRV adaptive only after 3 distinct SDNN samples (a single SDNN reading
+//     is too noisy to serve as a baseline).
+//   - Workout filter raised 5 → 20 kcal / 5 min in HealthKitService — walking
+//     burns ~4–5 kcal/min, so the old threshold blocked triggers whenever the
+//     user was merely moving around.
 
 // HRV + HR points only. Accepts sensitivityLevel so Settings changes apply.
+// Points are returned per-signal because persistence only counts FRESH
+// evidence (see startRealMonitoring). Mirrors HealthManager.swift.
 function calculatePhysioScore({hrv, hr, baseline, sensitivityLevel = 1}) {
-  let score = 0;
+  let hrPoints  = 0;
+  let hrvPoints = 0;
   const reasons = [];
   const thresholds = SENSITIVITY_THRESHOLDS[sensitivityLevel] ?? SENSITIVITY_THRESHOLDS[1];
 
-  // HRV drop below personal baseline
+  // HRV drop below personal baseline.
+  // Adaptive only after 3 distinct SDNN samples: a single sample is too noisy
+  // to serve as a baseline, and it must never be scored against the
+  // un-personalized 50ms default.
   if (hrv !== null) {
-    if (baseline.sampleCount >= 3) {
+    if (baseline.hrvCount >= 3) {
       const hrvDrop = ((baseline.hrv - hrv) / baseline.hrv) * 100;
       if (hrvDrop >= thresholds.hrvDropPct) {
-        score += 2;
+        hrvPoints = 2;
         reasons.push(`HRV ${hrvDrop.toFixed(0)}% below baseline (+2)`);
       }
     } else if (hrv < 30) {
-      // Fallback fixed floor while baseline is still warming up (<3 samples)
-      score += 2;
+      // Fallback fixed floor while the HRV baseline warms up
+      hrvPoints = 2;
       reasons.push(`HRV ${hrv.toFixed(0)}ms below 30ms floor (+2)`);
     }
   }
 
-  // HR rise above personal baseline
+  // HR rise above personal baseline.
+  // HR baselines are far less noisy — adaptive after 1 calm sample so the
+  // conservative 88bpm floor rules out early triggering as briefly as possible.
   if (hr !== null) {
-    if (baseline.sampleCount >= 3) {
+    if (baseline.hrCount >= 1) {
       const hrRise = hr - baseline.hr;
       if (hrRise >= thresholds.hrRiseBpm) {
-        score += 2;
+        hrPoints = 2;
         reasons.push(`HR ${hrRise.toFixed(0)} bpm above baseline (+2)`);
       }
     } else if (hr > 88) {
-      score += 2;
+      hrPoints = 2;
       reasons.push(`HR ${hr.toFixed(0)}bpm above 88 floor (+2)`);
     }
   }
 
-  return {score, reasons};
+  return {score: hrPoints + hrvPoints, hrPoints, hrvPoints, reasons};
 }
 
 // Full score: physio + movement + persistence.
@@ -228,6 +264,11 @@ export function AppProvider({children}) {
   const monitorIntervalRef = useRef(null);
   const sessionStartRef    = useRef(null);
   const persistenceRef     = useRef(0);
+  // Persistence bookkeeping — distinct-sample gating (mirrors the watch):
+  // sample endDates in epoch ms, from HealthKitService.checkStress().
+  const firstElevatedDateRef  = useRef(null);
+  const lastCountedHRDateRef  = useRef(null);
+  const lastCountedHRVDateRef = useRef(null);
   const baselineRef        = useRef({...DEFAULT_BASELINE});
   const sessionTimeoutRef  = useRef(null);
   const sessionBackgroundAtRef = useRef(null);
@@ -335,18 +376,25 @@ export function AppProvider({children}) {
   }, []);
 
   // ── Update baseline with calm readings ────────────────────────────────────
+  // Each signal updates independently: an HR-only calm reading (the common
+  // case — SDNN is written rarely) still teaches the HR baseline instead of
+  // being discarded. Mirrors HealthManager.swift updateBaseline.
   const updateBaseline = (hrv, hr) => {
     const b = baselineRef.current;
-    if (hrv !== null && hr !== null) {
-      const n = b.sampleCount + 1;
-      baselineRef.current = {
-        hrv: n < 5 ? (b.hrv * b.sampleCount + hrv) / n
-                   : b.hrv * 0.85 + hrv * 0.15,
-        hr:  n < 5 ? (b.hr  * b.sampleCount + hr)  / n
-                   : b.hr  * 0.85 + hr  * 0.15,
-        sampleCount: Math.min(n, 100),
-      };
+    const next = {...b};
+    if (hr !== null) {
+      const n = b.hrCount + 1;
+      next.hr = n < 5 ? (b.hr * b.hrCount + hr) / n
+                      : b.hr * 0.85 + hr * 0.15;
+      next.hrCount = Math.min(n, 100);
     }
+    if (hrv !== null) {
+      const n = b.hrvCount + 1;
+      next.hrv = n < 5 ? (b.hrv * b.hrvCount + hrv) / n
+                       : b.hrv * 0.85 + hrv * 0.15;
+      next.hrvCount = Math.min(n, 100);
+    }
+    baselineRef.current = next;
   };
 
   // ── Real HealthKit monitoring (iOS) ──────────────────────────────────────
@@ -356,23 +404,58 @@ export function AppProvider({children}) {
     monitorIntervalRef.current = setInterval(async () => {
       if (simulatingRef.current) return;
 
-      // BUG 1 FIX: checkStress returns { hrv, hr, isActive } only.
-      // isStressed and stressIndex no longer exist on the result object.
-      // Removed the broken destructure of isStressed / result.stressIndex.
-      const {hrv, hr, isActive} = await HealthKitService.checkStress();
+      // BUG 1 FIX: checkStress returns raw readings only (no isStressed /
+      // stressIndex). hrDate/hrvDate are the sample endDates in epoch ms.
+      const {hrv, hrvDate, hr, hrDate, isActive} = await HealthKitService.checkStress();
 
-      // BUG 7 FIX: persistence tracks elevated physiology (any HRV/HR points),
-      // updated BEFORE the full score so its +1 applies from the 2nd check.
       const physio = calculatePhysioScore({
         hrv,
         hr,
         baseline:         baselineRef.current,
         sensitivityLevel: sensitivityRef.current,
       });
-      if (physio.score >= 2) {
-        persistenceRef.current += 1;
-      } else {
+
+      // ── Persistence — distinct samples with FRESH evidence only ──────────
+      // (mirrors HealthManager.swift evaluateStress)
+      // getHeartRate/getHRV return the latest sample within a lookback
+      // window, so consecutive 30s polls usually re-read the SAME sample —
+      // counting those as "persistence" let one momentary reading trigger.
+      // Rules:
+      //   - the counter moves only when a NEW HR sample appeared;
+      //   - HRV elevation counts as evidence once per SDNN sample (a stale
+      //     sample echoing inside its 1h window neither counts nor resets);
+      //   - a >30-min gap between counted samples starts a new episode.
+      if (
+        lastCountedHRDateRef.current !== null && hrDate !== null &&
+        hrDate - lastCountedHRDateRef.current > EPISODE_GAP_LIMIT_MS
+      ) {
         persistenceRef.current = 0;
+        firstElevatedDateRef.current = null;
+      }
+
+      const isNewHRSample =
+        hrDate !== null &&
+        (lastCountedHRDateRef.current === null || hrDate > lastCountedHRDateRef.current);
+      const hrvIsFresh =
+        hrvDate !== null &&
+        (lastCountedHRVDateRef.current === null || hrvDate > lastCountedHRVDateRef.current);
+
+      if (isNewHRSample) {
+        const freshEvidence =
+          physio.hrPoints > 0 || (physio.hrvPoints > 0 && hrvIsFresh);
+        if (freshEvidence) {
+          if (persistenceRef.current === 0) firstElevatedDateRef.current = hrDate;
+          persistenceRef.current += 1;
+          if (physio.hrvPoints > 0 && hrvIsFresh) {
+            lastCountedHRVDateRef.current = hrvDate;
+          }
+        } else if (physio.score === 0) {
+          persistenceRef.current = 0;
+          firstElevatedDateRef.current = null;
+        }
+        // physio.score > 0 from an HRV echo alone: hold the streak —
+        // neither fresh evidence of stress nor evidence of calm.
+        lastCountedHRDateRef.current = hrDate;
       }
 
       const {score, reasons} = assembleStressScore({
@@ -381,17 +464,17 @@ export function AppProvider({children}) {
         persistenceCount: persistenceRef.current,
       });
 
-      // BUG 1 FIX: baseline updated when score < 5 (calm reading).
-      // BUG 6 FIX: ...and never during a workout — workout readings capped at
-      // score 4 used to pass this gate and drag the baseline toward workout
-      // HR/HRV. Mirrors HealthManager.swift evaluateStress().
-      if (score < 5 && isActive !== true) {
+      // BUG 1 FIX: baseline updated on calm readings only — the gate matches
+      // the trigger gate (score < 4) so a triggering reading never feeds it.
+      // BUG 6 FIX: ...and never during a workout.
+      // Mirrors HealthManager.swift evaluateStress().
+      if (score < 4 && isActive !== true) {
         updateBaseline(hrv, hr);
       }
 
       // BUG 1 FIX: stressIndex derived from score, not from result.stressIndex
-      // (which was undefined). Scaled so score=5 → ~80, score=0 → ~0.
-      const derivedStressIndex = Math.min(100, Math.round((score / 5) * 80));
+      // (which was undefined). Scaled so score=4 (trigger) → ~80, score=0 → ~0.
+      const derivedStressIndex = Math.min(100, Math.round((score / 4) * 80));
 
       setBiometrics(prev => ({
         ...prev,
@@ -418,12 +501,20 @@ export function AppProvider({children}) {
       if (!settingsRef.current.autoDetect) return;
 
       // BUG 2 FIX: use activePromptRef (current value) not activePrompt (stale closure).
-      // BUG 7 FIX: persistence is a hard gate — 2+ consecutive elevated checks
-      // (≈60s) — and the workout gate is explicit, since persistence can now
-      // accumulate while isActive is true.
-      if (
-        score >= 5 &&
+      // BUG 7 FIX: persistence is a hard gate — 2+ distinct elevated samples
+      // spanning 30s+ — and the workout gate is explicit, since persistence
+      // can accumulate while isActive is true.
+      // RELAXATION: gate lowered 5 → 4 — one strong physio signal with low
+      // movement and persistence triggers. Mirrors HealthManager.swift.
+      const persistedLongEnough =
         persistenceRef.current >= 2 &&
+        firstElevatedDateRef.current !== null &&
+        hrDate !== null &&
+        hrDate - firstElevatedDateRef.current >= PERSISTENCE_MIN_SPAN_MS;
+
+      if (
+        score >= 4 &&
+        persistedLongEnough &&
         isActive !== true &&
         !simulatingRef.current &&
         !activePromptRef.current
@@ -454,6 +545,7 @@ export function AppProvider({children}) {
     setActivePrompt(prompt);
     sessionStartRef.current = new Date();
     persistenceRef.current  = 0;
+    firstElevatedDateRef.current = null;
 
     // BUG 4a FIX: start session timeout immediately on trigger.
     // Previously only the AppState background transition started the timeout,
@@ -531,6 +623,7 @@ export function AppProvider({children}) {
     setActivePrompt(null);
     sessionStartRef.current = null;
     persistenceRef.current  = 0;
+    firstElevatedDateRef.current = null;
     sessionBackgroundAtRef.current = null;
     console.log('[Selah] Session reset due to timeout/background/manual');
   };
