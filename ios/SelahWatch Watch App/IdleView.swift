@@ -1,6 +1,9 @@
 // SelahWatch/IdleView.swift
 
 import SwiftUI
+import Combine   // Timer.publish().autoconnect() — required explicitly under
+                 // Xcode 26's MemberImportVisibility (transitive SwiftUI
+                 // import no longer suffices)
 
 struct IdleView: View {
 
