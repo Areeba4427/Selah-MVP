@@ -2,6 +2,10 @@
 # The dev machine is Windows (no Xcode), so this workflow is the only way to
 # verify the Swift compiles before the client builds it. The watch target is
 # pure SwiftUI/HealthKit — it needs no CocoaPods / React Native setup.
+#
+# On failure the extracted compiler errors are posted as a comment on the
+# commit (job logs require authentication to download; commit comments on a
+# public repo are readable without it, so the Windows side can self-serve).
 name: watch-build
 
 on:
@@ -12,6 +16,9 @@ on:
       - ".github/workflows/watch-build.yml"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-watch-app:
     runs-on: macos-latest
@@ -19,14 +26,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Toolchain info
-        run: |
-          xcodebuild -version
-          xcodebuild -showsdks | grep -i watch || true
-
       - name: Build SelahWatch Watch App (no signing)
         run: |
           set -o pipefail
+          xcodebuild -version 2>&1 | tee build.log
+          { xcodebuild -showsdks 2>&1 | grep -i watch | tee -a build.log; } || true
           xcodebuild build \
             -project ios/SelahApp.xcodeproj \
             -target "SelahWatch Watch App" \
@@ -35,4 +39,23 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM=""
+            DEVELOPMENT_TEAM="" 2>&1 | tee -a build.log
+
+      - name: Post errors as commit comment
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "**watch-build failed** — extracted diagnostics:"
+            echo '```'
+            grep -E "(error|fatal error):" build.log | head -80
+            echo "---- log tail ----"
+            tail -n 60 build.log
+            echo '```'
+          } > comment.md
+          python3 -c "import json;print(json.dumps({'body':open('comment.md').read()[:60000]}))" > payload.json
+          curl -s -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/comments" \
+            -d @payload.json -o /dev/null -w "comment POST: %{http_code}\n"
